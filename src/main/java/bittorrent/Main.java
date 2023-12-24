@@ -16,33 +16,44 @@ import bittorrent.bencode.Serializer;
 import bittorrent.torrent.Torrent;
 
 public class Main {
+	
+	public static final HexFormat HEX_FORMAT = HexFormat.of();
 
-	private static final Gson gson = new Gson();
-	//	private static final Gson prettyGson = new GsonBuilder().setPrettyPrinting().create();
-
-	@SuppressWarnings("unchecked")
 	public static void main(String[] args) throws Exception {
 		String command = args[0];
 		if ("decode".equals(command)) {
-			final var encoded = args[1];
-			final var decoded = new Deserializer(encoded).parse();
-
-			System.out.println(gson.toJson(decoded));
+			decode(args);
 		} else if ("info".equals(command)) {
-			final var path = args[1];
-			final var content = Files.readAllBytes(Paths.get(path));
-			final var decoded = new Deserializer(content).parse();
-
-			@SuppressWarnings("unchecked")
-			final var torrent = Torrent.of((Map<String, Object>) decoded);
-
-			//			System.out.println(prettyGson.toJson(decoded));
-
-			System.out.println("Tracker URL: %s".formatted(torrent.announce()));
-			System.out.println("Length: %d".formatted(torrent.info().length()));
-			System.out.println("Info Hash: %s".formatted(shaInfo(decoded)));
+			info(args);
 		} else {
 			System.out.println("Unknown command: " + command);
+		}
+	}
+
+	private static void decode(String[] args) throws IOException {
+		final var gson = new Gson();
+
+		final var encoded = args[1];
+		final var decoded = new Deserializer(encoded).parse();
+
+		System.out.println(gson.toJson(decoded));
+	}
+
+	@SuppressWarnings("unchecked")
+	private static void info(String[] args) throws IOException, NoSuchAlgorithmException {
+		final var path = args[1];
+		final var content = Files.readAllBytes(Paths.get(path));
+		final var decoded = new Deserializer(content).parse();
+
+		final var torrent = Torrent.of((Map<String, Object>) decoded);
+
+		System.out.println("Tracker URL: %s".formatted(torrent.announce()));
+		System.out.println("Length: %d".formatted(torrent.info().length()));
+		System.out.println("Info Hash: %s".formatted(shaInfo(decoded)));
+		System.out.println("Piece Length: %d".formatted(torrent.info().pieceLength()));
+		System.out.println("Piece Hashes:");
+		for (final var hash : torrent.info().pieces()) {
+			System.out.println(HEX_FORMAT.formatHex(hash));
 		}
 	}
 
@@ -54,7 +65,7 @@ public class Main {
 		new Serializer().write(info, infoOutputStream);
 
 		final var digest = MessageDigest.getInstance("SHA-1").digest(infoOutputStream.toByteArray());
-		return HexFormat.of().formatHex(digest);
+		return HEX_FORMAT.formatHex(digest);
 	}
 
 }
