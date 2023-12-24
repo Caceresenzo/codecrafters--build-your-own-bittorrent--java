@@ -4,6 +4,7 @@ import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -51,11 +52,11 @@ public class Deserializer {
 		throw new UnsupportedOperationException("unknown character: " + (char) first);
 	}
 
-	private byte[] parseString() throws IOException {
+	private String parseString() throws IOException {
 		final var length = Integer.parseInt(readUntil(':'));
 		final var bytes = inputStream.readNBytes(length);
 
-		return bytes;
+		return new String(bytes, StandardCharsets.ISO_8859_1);
 	}
 
 	private long parseNumber() throws IOException {
@@ -85,7 +86,7 @@ public class Deserializer {
 
 		int next;
 		while ((next = peek()) != 'e' && next != -1) {
-			final var key = new String(parseString());
+			final var key = parseString();
 			final var value = parse();
 
 			map.put(key, value);
