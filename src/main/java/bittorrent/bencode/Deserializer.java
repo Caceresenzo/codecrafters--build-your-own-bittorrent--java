@@ -57,10 +57,13 @@ public class Deserializer {
 		inputStream.read(); /* ignore l */
 
 		final var list = new ArrayList<Object>();
-		while (peek() != 'e') {
+
+		int next;
+		while ((next = peek()) != 'e' && next != -1) {
 			list.add(parse());
 		}
 
+		inputStream.read(); /* ignore e */
 		return list;
 	}
 
