@@ -6,7 +6,10 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
+import bittorrent.DigestUtils;
+
 public record TorrentInfo(
+	byte[] hash,
 	long length,
 	String name,
 	long pieceLength,
@@ -14,18 +17,19 @@ public record TorrentInfo(
 ) {
 
 	public static TorrentInfo of(Map<String, Object> root) {
+		final var hash = DigestUtils.shaInfo(root);
 		final var length = (long) root.getOrDefault("length", -1l);
 		final var name = (String) root.get("name");
 		final var pieceLength = (long) root.get("piece length");
 
-		final var hashes = ((String) root.get("pieces")).getBytes(StandardCharsets.ISO_8859_1);
+		final var pieceHashes = ((String) root.get("pieces")).getBytes(StandardCharsets.ISO_8859_1);
 		final var pieces = new ArrayList<byte[]>();
-		for (var start = 0; start < hashes.length; start += 20) {
-			final var piece = Arrays.copyOfRange(hashes, start, start + 20);
+		for (var start = 0; start < pieceHashes.length; start += 20) {
+			final var piece = Arrays.copyOfRange(pieceHashes, start, start + 20);
 			pieces.add(piece);
 		}
 
-		return new TorrentInfo(length, name, pieceLength, pieces);
+		return new TorrentInfo(hash, length, name, pieceLength, pieces);
 	}
 
 }
