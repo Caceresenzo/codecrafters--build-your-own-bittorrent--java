@@ -9,7 +9,7 @@ public record Torrent(
 
 	@SuppressWarnings("unchecked")
 	public static Torrent of(Map<String, Object> root) {
-		final var announce = (String) root.get("announce");
+		final var announce = new String((byte[]) root.get("announce"));
 		final var info = TorrentInfo.of((Map<String, Object>) root.get("info"));
 
 		return new Torrent(announce, info);
