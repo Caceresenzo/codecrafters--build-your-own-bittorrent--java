@@ -6,6 +6,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 public class Deserializer {
 
@@ -37,6 +39,10 @@ public class Deserializer {
 		if ('l' == first) {
 			return parseList();
 		}
+		
+		if ('d' == first) {
+			return parseMap();
+		}
 
 		throw new UnsupportedOperationException("unknown character: " + (char) first);
 	}
@@ -65,6 +71,23 @@ public class Deserializer {
 
 		inputStream.read(); /* ignore e */
 		return list;
+	}
+	
+	private Map<String, Object> parseMap() throws IOException {
+		inputStream.read(); /* ignore d */
+		
+		final var map = new TreeMap<String, Object>();
+		
+		int next;
+		while ((next = peek()) != 'e' && next != -1) {
+			final var key = parseString();
+			final var value = parse();
+			
+			map.put(key, value);
+		}
+		
+		inputStream.read(); /* ignore e */
+		return map;
 	}
 
 	private String readUntil(char end) throws IOException {
