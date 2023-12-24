@@ -4,6 +4,7 @@ import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -15,6 +16,10 @@ public class Deserializer {
 
 	public Deserializer(String input) {
 		this(new ByteArrayInputStream(input.getBytes()));
+	}
+
+	public Deserializer(byte[] input) {
+		this(new ByteArrayInputStream(input));
 	}
 
 	public Deserializer(InputStream inputStream) {
@@ -39,7 +44,7 @@ public class Deserializer {
 		if ('l' == first) {
 			return parseList();
 		}
-		
+
 		if ('d' == first) {
 			return parseMap();
 		}
@@ -51,7 +56,7 @@ public class Deserializer {
 		final var length = Integer.parseInt(readUntil(':'));
 		final var bytes = inputStream.readNBytes(length);
 
-		return new String(bytes);
+		return new String(bytes, StandardCharsets.US_ASCII);
 	}
 
 	private long parseNumber() throws IOException {
@@ -72,20 +77,20 @@ public class Deserializer {
 		inputStream.read(); /* ignore e */
 		return list;
 	}
-	
+
 	private Map<String, Object> parseMap() throws IOException {
 		inputStream.read(); /* ignore d */
-		
+
 		final var map = new TreeMap<String, Object>();
-		
+
 		int next;
 		while ((next = peek()) != 'e' && next != -1) {
 			final var key = parseString();
 			final var value = parse();
-			
+
 			map.put(key, value);
 		}
-		
+
 		inputStream.read(); /* ignore e */
 		return map;
 	}
@@ -110,11 +115,6 @@ public class Deserializer {
 		final var value = inputStream.read();
 		inputStream.reset();
 		return value;
-	}
-
-	public static void main(String[] args) throws IOException {
-		System.out.println(new Deserializer("5:hello").parse());
-		System.out.println(new Deserializer("i52e").parse());
 	}
 
 }
