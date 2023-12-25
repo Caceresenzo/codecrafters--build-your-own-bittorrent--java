@@ -1,5 +1,7 @@
 package bittorrent;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.Socket;
 import java.nio.file.Files;
@@ -28,6 +30,7 @@ public class Main {
 			case "info" -> info(args[1]);
 			case "peers" -> peers(args[1]);
 			case "handshake" -> handshake(args[1], args[2]);
+			case "download_piece" -> downloadPiece(args[3], Integer.parseInt(args[4]), args[2]);
 			default -> System.out.println("Unknown command: " + command);
 		}
 	}
@@ -67,7 +70,7 @@ public class Main {
 		}
 	}
 
-	private static void handshake(String path, String peerIpAndPort) throws IOException {
+	private static void handshake(String path, String peerIpAndPort) throws IOException, InterruptedException {
 		final var torrent = load(path);
 
 		final var parts = peerIpAndPort.split(":", 2);
@@ -75,6 +78,21 @@ public class Main {
 
 		try (final var peer = Peer.connect(socket, torrent)) {
 			System.out.println("Peer ID: %s".formatted(HEX_FORMAT.formatHex(peer.getId())));
+		}
+	}
+
+	private static void downloadPiece(String path, int pieceIndex, String outputPath) throws IOException, InterruptedException {
+		final var torrent = load(path);
+
+		final var trackerClient = new TrackerClient();
+		final var firstPeer = trackerClient.announce(torrent).peers().getFirst();
+
+		try (
+			final var peer = Peer.connect(firstPeer, torrent);
+			final var fileOutputStream = new FileOutputStream(new File(outputPath));
+		) {
+			final var data = peer.downloadPiece(pieceIndex);
+			fileOutputStream.write(data);
 		}
 	}
 

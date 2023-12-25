@@ -1,23 +1,174 @@
 package bittorrent.peer;
 
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Arrays;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.function.Predicate;
 
+import bittorrent.peer.message.BitfieldMessage;
+import bittorrent.peer.message.ChokeMessage;
+import bittorrent.peer.message.InterestedMessage;
+import bittorrent.peer.message.KeepAliveMessage;
+import bittorrent.peer.message.Message;
+import bittorrent.peer.message.MessageType;
+import bittorrent.peer.message.PieceMessage;
+import bittorrent.peer.message.RequestMessage;
+import bittorrent.peer.message.UnchokeMessage;
 import bittorrent.torrent.Torrent;
-import lombok.AccessLevel;
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
+import lombok.SneakyThrows;
 
-@RequiredArgsConstructor(access = AccessLevel.PRIVATE)
-public class Peer implements AutoCloseable {
+public class Peer implements AutoCloseable, Runnable {
 
 	private static final byte[] PADDING8 = new byte[8];
 
 	private final @Getter byte[] id;
+	private final Torrent torrent;
 	private final Socket socket;
+	private final BlockingQueue<Message> queue;
+	private final Thread thread;
+
+	public Peer(byte[] id, Torrent torrent, Socket socket) {
+		this.id = id;
+		this.torrent = torrent;
+		this.socket = socket;
+
+		this.queue = new ArrayBlockingQueue<>(10, true);
+		this.thread = Thread.startVirtualThread(this);
+	}
+
+	@Override
+	@SneakyThrows
+	public void run() {
+		try {
+			final var first = receive();
+			if (!(first instanceof BitfieldMessage)) {
+				throw new IllegalStateException("first message is not bitfield: " + first);
+			}
+
+			while (true) {
+				final var message = receive();
+
+				if (message instanceof KeepAliveMessage) {
+					send(message);
+					continue;
+				}
+
+				this.queue.put(message);
+			}
+		} catch (SocketException exception) {
+			if (!"Closed by interrupt".equals(exception.getMessage())) {
+				throw exception;
+			}
+		} catch (InterruptedException exception) {
+			;
+		}
+	}
+
+	public Message receive() throws IOException {
+		final var inputStream = socket.getInputStream();
+		final var dataInputStream = new DataInputStream(inputStream);
+
+		final var length = dataInputStream.readInt();
+		if (length == 0) {
+			return new KeepAliveMessage();
+		}
+
+		final var typeId = (int) dataInputStream.readByte();
+		final var messageType = MessageType.valueOf(typeId);
+		System.out.println("recv: type=%s length=%d".formatted(messageType, length));
+
+		final var payloadLength = length - 1;
+		return messageType.getDeserializer().deserialize(payloadLength, dataInputStream);
+	}
+
+	public Message waitFor(Predicate<Message> predicate) throws InterruptedException {
+		while (true) {
+			final var message = queue.take();
+
+			if (predicate.test(message)) {
+				return message;
+			}
+
+			System.err.println("discard: " + message);
+		}
+	}
+
+	public void send(Message message) throws IOException {
+		final var outputStream = socket.getOutputStream();
+		final var dataOutputStream = new DataOutputStream(outputStream);
+
+		final var length = message.length();
+		dataOutputStream.writeInt(length);
+
+		if (length == 0) {
+			return;
+		}
+
+		final var messageType = message.type();
+		final var typeId = (byte) messageType.ordinal();
+		dataOutputStream.writeByte(typeId);
+
+		System.out.println("send: type=%s length=%d".formatted(messageType, length));
+		message.serialize(dataOutputStream);
+	}
+
+	public byte[] downloadPiece(int pieceIndex) throws IOException, InterruptedException {
+		sendInterested();
+
+		final var pieceLength = torrent.info().pieceLength();
+		final var bytes = new byte[pieceLength];
+
+		final var blockSize = (int) Math.pow(2, 14);
+		var blockCount = 0;
+
+		for (var blockStart = 0; blockStart < pieceLength; blockStart += blockSize) {
+			++blockCount;
+
+			send(new RequestMessage(
+				pieceIndex,
+				blockStart,
+				blockSize
+			));
+		}
+
+		for (var index = 0; index < blockCount; ++index) {
+			final var pieceMessage = (PieceMessage) waitFor((message) -> message instanceof PieceMessage);
+
+			System.arraycopy(pieceMessage.block(), 0, bytes, pieceMessage.begin(), pieceMessage.block().length);
+		}
+
+		return bytes;
+	}
+
+	public void sendInterested() throws IOException, InterruptedException {
+		while (true) {
+			send(new InterestedMessage());
+
+			final var choke = waitFor((message) -> message instanceof UnchokeMessage || message instanceof ChokeMessage);
+			if (choke instanceof UnchokeMessage) {
+				break;
+			}
+
+			System.out.println("peer is chocked");
+			Thread.sleep(Duration.ofSeconds(1));
+		}
+	}
+
+	@Override
+	public void close() throws IOException, InterruptedException {
+		thread.interrupt();
+		thread.join();
+		socket.close();
+	}
 
 	public static Peer connect(InetSocketAddress address, Torrent torrent) throws IOException {
 		final var socket = new Socket(address.getAddress(), address.getPort());
@@ -67,17 +218,12 @@ public class Peer implements AutoCloseable {
 				}
 
 				final var peerId = inputStream.readNBytes(20);
-				return new Peer(peerId, socket);
+				return new Peer(peerId, torrent, socket);
 			}
 		} catch (Exception exception) {
 			socket.close();
 			throw exception;
 		}
-	}
-
-	@Override
-	public void close() throws IOException {
-		socket.close();
 	}
 
 }
