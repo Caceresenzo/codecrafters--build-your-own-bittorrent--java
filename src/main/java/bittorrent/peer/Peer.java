@@ -128,19 +128,14 @@ public class Peer implements AutoCloseable, Runnable {
 		final var bytes = new byte[pieceLength];
 
 		final var blockSize = (int) Math.pow(2, 14);
-		var blockCount = 0;
 
 		for (var blockStart = 0; blockStart < pieceLength; blockStart += blockSize) {
-			++blockCount;
-
 			send(new RequestMessage(
 				pieceIndex,
 				blockStart,
 				blockSize
 			));
-		}
 
-		for (var index = 0; index < blockCount; ++index) {
 			final var pieceMessage = (PieceMessage) waitFor((message) -> message instanceof PieceMessage);
 
 			System.arraycopy(pieceMessage.block(), 0, bytes, pieceMessage.begin(), pieceMessage.block().length);
