@@ -13,12 +13,16 @@ import lombok.experimental.UtilityClass;
 public class DigestUtils {
 
 	@SneakyThrows
+	public static byte[] sha1(byte[] array) {
+		return MessageDigest.getInstance("SHA-1").digest(array);
+	}
+
+	@SneakyThrows
 	public static byte[] shaInfo(final Object infoRoot) {
 		final var infoOutputStream = new ByteArrayOutputStream();
 		new Serializer().write(infoRoot, infoOutputStream);
 
-		final var digest = MessageDigest.getInstance("SHA-1").digest(infoOutputStream.toByteArray());
-		return digest;
+		return sha1(infoOutputStream.toByteArray());
 	}
 
 	@SneakyThrows

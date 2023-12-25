@@ -2,6 +2,7 @@ package bittorrent.peer;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
@@ -11,6 +12,7 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
 import bittorrent.peer.message.BitfieldMessage;
@@ -23,6 +25,7 @@ import bittorrent.peer.message.PieceMessage;
 import bittorrent.peer.message.RequestMessage;
 import bittorrent.peer.message.UnchokeMessage;
 import bittorrent.torrent.Torrent;
+import bittorrent.util.DigestUtils;
 import lombok.Getter;
 import lombok.SneakyThrows;
 
@@ -36,10 +39,15 @@ public class Peer implements AutoCloseable, Runnable {
 	private final BlockingQueue<Message> queue;
 	private final Thread thread;
 
-	public Peer(byte[] id, Torrent torrent, Socket socket) {
+	public Peer(byte[] id, Torrent torrent, Socket socket) throws IOException {
 		this.id = id;
 		this.torrent = torrent;
 		this.socket = socket;
+
+		final var first = receive();
+		if (!(first instanceof BitfieldMessage)) {
+			throw new IllegalStateException("first message is not bitfield: " + first);
+		}
 
 		this.queue = new ArrayBlockingQueue<>(10, true);
 		this.thread = Thread.startVirtualThread(this);
@@ -49,11 +57,6 @@ public class Peer implements AutoCloseable, Runnable {
 	@SneakyThrows
 	public void run() {
 		try {
-			final var first = receive();
-			if (!(first instanceof BitfieldMessage)) {
-				throw new IllegalStateException("first message is not bitfield: " + first);
-			}
-
 			while (true) {
 				final var message = receive();
 
@@ -68,8 +71,12 @@ public class Peer implements AutoCloseable, Runnable {
 			if (!"Closed by interrupt".equals(exception.getMessage())) {
 				throw exception;
 			}
+
+			System.err.println("socket: %s".formatted(exception.getMessage()));
 		} catch (InterruptedException exception) {
-			;
+			System.err.println("interrupt: %s".formatted(exception.getMessage()));
+		} catch (EOFException exception) {
+			System.err.println("eof: %s".formatted(exception.getMessage()));
 		}
 	}
 
@@ -84,15 +91,25 @@ public class Peer implements AutoCloseable, Runnable {
 
 		final var typeId = (int) dataInputStream.readByte();
 		final var messageType = MessageType.valueOf(typeId);
-		System.out.println("recv: type=%s length=%d".formatted(messageType, length));
 
 		final var payloadLength = length - 1;
-		return messageType.getDeserializer().deserialize(payloadLength, dataInputStream);
+		final var message = messageType.getDeserializer().deserialize(payloadLength, dataInputStream);
+
+		System.out.println("recv: type=%s length=%d message=%s".formatted(messageType, length, message));
+		
+		return message;
 	}
 
 	public Message waitFor(Predicate<Message> predicate) throws InterruptedException {
 		while (true) {
-			final var message = queue.take();
+			final var message = queue.poll(200, TimeUnit.MILLISECONDS);
+			if (message == null) {
+				if (thread.isAlive()) {
+					continue;
+				}
+
+				return null;
+			}
 
 			if (predicate.test(message)) {
 				return message;
@@ -117,28 +134,59 @@ public class Peer implements AutoCloseable, Runnable {
 		final var typeId = (byte) messageType.ordinal();
 		dataOutputStream.writeByte(typeId);
 
-		System.out.println("send: type=%s length=%d".formatted(messageType, length));
+		System.out.println("send: type=%s length=%d message=%s".formatted(messageType, length, message));
 		message.serialize(dataOutputStream);
 	}
 
 	public byte[] downloadPiece(int pieceIndex) throws IOException, InterruptedException {
 		sendInterested();
-
+		
+		final var fileLength = torrent.info().length();
 		final var pieceLength = torrent.info().pieceLength();
-		final var bytes = new byte[pieceLength];
+		
+		var realPieceLength = pieceLength;
+		if (torrent.info().pieces().size() - 1 == pieceIndex) {
+			realPieceLength = (int) (fileLength % pieceLength);
+		}
+		
+		final var pieceHash = torrent.info().pieces().get(pieceIndex);
+		
+		final var bytes = new byte[realPieceLength];
 
 		final var blockSize = (int) Math.pow(2, 14);
+		var blockCount = 0;
 
-		for (var blockStart = 0; blockStart < pieceLength; blockStart += blockSize) {
+		var blockStart = 0;
+		for (; blockStart < realPieceLength - blockSize; blockStart += blockSize) {
+			++blockCount;
+
 			send(new RequestMessage(
 				pieceIndex,
 				blockStart,
 				blockSize
 			));
+		}
 
+		final var remaining = realPieceLength - blockStart;
+		if (remaining != 0) {
+			++blockCount;
+
+			send(new RequestMessage(
+				pieceIndex,
+				blockStart,
+				remaining
+			));
+		}
+
+		for (var index = 0; index < blockCount; ++index) {
 			final var pieceMessage = (PieceMessage) waitFor((message) -> message instanceof PieceMessage);
 
 			System.arraycopy(pieceMessage.block(), 0, bytes, pieceMessage.begin(), pieceMessage.block().length);
+		}
+		
+		final var downloadedPieceHash = DigestUtils.sha1(bytes);
+		if (!Arrays.equals(pieceHash, downloadedPieceHash)) {
+			throw new IllegalStateException("piece hash does not match");
 		}
 
 		return bytes;
