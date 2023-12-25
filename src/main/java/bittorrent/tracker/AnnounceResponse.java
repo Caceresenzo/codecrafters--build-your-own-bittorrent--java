@@ -1,0 +1,36 @@
+package bittorrent.tracker;
+
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+
+import lombok.SneakyThrows;
+
+public record AnnounceResponse(
+	long interval,
+	List<InetSocketAddress> peers
+) {
+
+	@SneakyThrows
+	public static AnnounceResponse of(Map<String, Object> root) {
+		final var interval = (long) root.get("interval");
+
+		final var peersString = ((String) root.get("peers")).getBytes(StandardCharsets.ISO_8859_1);
+		final var peers = new ArrayList<InetSocketAddress>();
+
+		for (var start = 0; start < peersString.length; start += 6) {
+			final var address = Arrays.copyOfRange(peersString, start, start + 4);
+			final var port = (((int) peersString[start + 5]) << 8) + (peersString[start + 4]);
+
+			final var peer = new InetSocketAddress(InetAddress.getByAddress(address), port);
+			peers.add(peer);
+		}
+
+		return new AnnounceResponse(interval, peers);
+	}
+
+}

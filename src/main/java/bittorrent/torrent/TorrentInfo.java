@@ -6,7 +6,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
-import bittorrent.DigestUtils;
+import bittorrent.util.DigestUtils;
 
 public record TorrentInfo(
 	byte[] hash,
