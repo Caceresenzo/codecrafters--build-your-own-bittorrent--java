@@ -31,6 +31,8 @@ public class Peer implements AutoCloseable {
 	private final @Getter byte[] id;
 	private final Torrent torrent;
 	private final Socket socket;
+	private boolean bitfield;
+	private boolean interested;
 
 	public Peer(byte[] id, Torrent torrent, Socket socket) throws IOException {
 		this.id = id;
@@ -100,13 +102,22 @@ public class Peer implements AutoCloseable {
 
 		message.serialize(dataOutputStream);
 	}
-
-	public byte[] downloadPiece(int pieceIndex) throws IOException, InterruptedException {
-		final var first = receive();
-		if (!(first instanceof BitfieldMessage)) {
-			throw new IllegalStateException("first message is not bitfield: " + first);
+	
+	public void awaitBitfield() throws IOException {
+		if (bitfield) {
+			return;
 		}
 		
+		final var message = receive();
+		if (!(message instanceof BitfieldMessage)) {
+			throw new IllegalStateException("first message is not bitfield: " + message);
+		}
+		
+		bitfield = true;
+	}
+
+	public byte[] downloadPiece(int pieceIndex) throws IOException, InterruptedException {
+		awaitBitfield();
 		sendInterested();
 
 		final var fileLength = torrent.info().length();
@@ -161,11 +172,16 @@ public class Peer implements AutoCloseable {
 	}
 
 	public void sendInterested() throws IOException, InterruptedException {
+		if (interested) {
+			return;
+		}
+		
 		while (true) {
 			send(new InterestedMessage());
 
 			final var choke = waitFor((message) -> message instanceof UnchokeMessage || message instanceof ChokeMessage);
 			if (choke instanceof UnchokeMessage) {
+				interested = true;
 				break;
 			}
 

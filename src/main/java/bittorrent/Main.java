@@ -31,6 +31,7 @@ public class Main {
 			case "peers" -> peers(args[1]);
 			case "handshake" -> handshake(args[1], args[2]);
 			case "download_piece" -> downloadPiece(args[3], Integer.parseInt(args[4]), args[2]);
+			case "download" -> download(args[3], args[2]);
 			default -> System.out.println("Unknown command: " + command);
 		}
 	}
@@ -93,6 +94,24 @@ public class Main {
 		) {
 			final var data = peer.downloadPiece(pieceIndex);
 			fileOutputStream.write(data);
+		}
+	}
+
+	private static void download(String path, String outputPath) throws IOException, InterruptedException {
+		final var torrent = load(path);
+
+		final var trackerClient = new TrackerClient();
+		final var firstPeer = trackerClient.announce(torrent).peers().getFirst();
+
+		try (
+			final var peer = Peer.connect(firstPeer, torrent);
+			final var fileOutputStream = new FileOutputStream(new File(outputPath));
+		) {
+			final var pieceCount = torrent.info().pieces().size();
+			for (var index = 0; index < pieceCount; ++index) {
+				final var data = peer.downloadPiece(index);
+				fileOutputStream.write(data);
+			}
 		}
 	}
 
