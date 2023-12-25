@@ -2,17 +2,12 @@ package bittorrent.peer;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
-import java.io.EOFException;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
 import bittorrent.peer.message.BitfieldMessage;
@@ -27,17 +22,15 @@ import bittorrent.peer.message.UnchokeMessage;
 import bittorrent.torrent.Torrent;
 import bittorrent.util.DigestUtils;
 import lombok.Getter;
-import lombok.SneakyThrows;
 
-public class Peer implements AutoCloseable, Runnable {
+public class Peer implements AutoCloseable {
 
+	public static boolean DEBUG = true;
 	private static final byte[] PADDING8 = new byte[8];
 
 	private final @Getter byte[] id;
 	private final Torrent torrent;
 	private final Socket socket;
-	private final BlockingQueue<Message> queue;
-	private final Thread thread;
 
 	public Peer(byte[] id, Torrent torrent, Socket socket) throws IOException {
 		this.id = id;
@@ -48,39 +41,9 @@ public class Peer implements AutoCloseable, Runnable {
 		if (!(first instanceof BitfieldMessage)) {
 			throw new IllegalStateException("first message is not bitfield: " + first);
 		}
-
-		this.queue = new ArrayBlockingQueue<>(10, true);
-		this.thread = Thread.startVirtualThread(this);
 	}
 
-	@Override
-	@SneakyThrows
-	public void run() {
-		try {
-			while (true) {
-				final var message = receive();
-
-				if (message instanceof KeepAliveMessage) {
-					send(message);
-					continue;
-				}
-
-				this.queue.put(message);
-			}
-		} catch (SocketException exception) {
-			if (!"Closed by interrupt".equals(exception.getMessage())) {
-				throw exception;
-			}
-
-			System.err.println("socket: %s".formatted(exception.getMessage()));
-		} catch (InterruptedException exception) {
-			System.err.println("interrupt: %s".formatted(exception.getMessage()));
-		} catch (EOFException exception) {
-			System.err.println("eof: %s".formatted(exception.getMessage()));
-		}
-	}
-
-	public Message receive() throws IOException {
+	private Message doReceive() throws IOException {
 		final var inputStream = socket.getInputStream();
 		final var dataInputStream = new DataInputStream(inputStream);
 
@@ -95,21 +58,25 @@ public class Peer implements AutoCloseable, Runnable {
 		final var payloadLength = length - 1;
 		final var message = messageType.getDeserializer().deserialize(payloadLength, dataInputStream);
 
-		System.out.println("recv: type=%s length=%d message=%s".formatted(messageType, length, message));
-		
+		System.err.println("recv: type=%s length=%d message=%s".formatted(messageType, length, message));
+
 		return message;
 	}
 
-	public Message waitFor(Predicate<Message> predicate) throws InterruptedException {
-		while (true) {
-			final var message = queue.poll(200, TimeUnit.MILLISECONDS);
-			if (message == null) {
-				if (thread.isAlive()) {
-					continue;
-				}
+	public Message receive() throws IOException {
+		var message = doReceive();
 
-				return null;
-			}
+		if (message instanceof KeepAliveMessage) {
+			send(message);
+			return receive();
+		}
+
+		return message;
+	}
+
+	public Message waitFor(Predicate<Message> predicate) throws InterruptedException, IOException {
+		while (true) {
+			final var message = receive();
 
 			if (predicate.test(message)) {
 				return message;
@@ -134,23 +101,24 @@ public class Peer implements AutoCloseable, Runnable {
 		final var typeId = (byte) messageType.ordinal();
 		dataOutputStream.writeByte(typeId);
 
-		System.out.println("send: type=%s length=%d message=%s".formatted(messageType, length, message));
+		System.err.println("send: type=%s length=%d message=%s".formatted(messageType, length, message));
+
 		message.serialize(dataOutputStream);
 	}
 
 	public byte[] downloadPiece(int pieceIndex) throws IOException, InterruptedException {
 		sendInterested();
-		
+
 		final var fileLength = torrent.info().length();
 		final var pieceLength = torrent.info().pieceLength();
-		
+
 		var realPieceLength = pieceLength;
 		if (torrent.info().pieces().size() - 1 == pieceIndex) {
 			realPieceLength = (int) (fileLength % pieceLength);
 		}
-		
+
 		final var pieceHash = torrent.info().pieces().get(pieceIndex);
-		
+
 		final var bytes = new byte[realPieceLength];
 
 		final var blockSize = (int) Math.pow(2, 14);
@@ -183,7 +151,7 @@ public class Peer implements AutoCloseable, Runnable {
 
 			System.arraycopy(pieceMessage.block(), 0, bytes, pieceMessage.begin(), pieceMessage.block().length);
 		}
-		
+
 		final var downloadedPieceHash = DigestUtils.sha1(bytes);
 		if (!Arrays.equals(pieceHash, downloadedPieceHash)) {
 			throw new IllegalStateException("piece hash does not match");
@@ -201,15 +169,13 @@ public class Peer implements AutoCloseable, Runnable {
 				break;
 			}
 
-			System.out.println("peer is chocked");
+			System.err.println("peer is chocked");
 			Thread.sleep(Duration.ofSeconds(1));
 		}
 	}
 
 	@Override
 	public void close() throws IOException, InterruptedException {
-		thread.interrupt();
-		thread.join();
 		socket.close();
 	}
 
