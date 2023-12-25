@@ -2,23 +2,20 @@ package bittorrent;
 
 import java.io.IOException;
 import java.net.Socket;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.Map;
 
 import com.google.gson.Gson;
 
 import bittorrent.bencode.Deserializer;
+import bittorrent.peer.Peer;
 import bittorrent.torrent.Torrent;
 import bittorrent.tracker.TrackerClient;
 import okhttp3.OkHttpClient;
 
 public class Main {
-
-	public static final byte[] PADDING8 = new byte[8];
 
 	public static final HexFormat HEX_FORMAT = HexFormat.of();
 	public static final OkHttpClient CLIENT = new OkHttpClient();
@@ -74,52 +71,10 @@ public class Main {
 		final var torrent = load(path);
 
 		final var parts = peerIpAndPort.split(":", 2);
+		final var socket = new Socket(parts[0], Integer.parseInt(parts[1]));
 
-		try (
-			final var socket = new Socket(parts[0], Integer.parseInt(parts[1]));
-			final var inputStream = socket.getInputStream();
-			final var outputStream = socket.getOutputStream();
-		) {
-			{
-				/* length of the protocol string */
-				outputStream.write(19);
-
-				/* the string BitTorrent protocol */
-				outputStream.write("BitTorrent protocol".getBytes(StandardCharsets.US_ASCII));
-
-				/* eight reserved bytes, which are all set to zero */
-				outputStream.write(PADDING8);
-
-				/* sha1 infohash */
-				outputStream.write(torrent.info().hash());
-
-				/* peer id */
-				outputStream.write("00112233445566778899".getBytes(StandardCharsets.US_ASCII));
-			}
-
-			{
-				final var length = inputStream.read();
-				if (length != 19) {
-					throw new IllegalStateException("invalid protocol length: " + length);
-				}
-
-				final var protocolString = new String(inputStream.readNBytes(19), StandardCharsets.US_ASCII);
-				if (!"BitTorrent protocol".equals(protocolString)) {
-					throw new IllegalStateException("invalid protocol string: " + protocolString);
-				}
-
-				/* padding */
-				inputStream.readNBytes(8);
-
-				final var infoHash = inputStream.readNBytes(20);
-				if (!Arrays.equals(infoHash, torrent.info().hash())) {
-					throw new IllegalStateException("invalid info hash: " + Arrays.toString(infoHash));
-				}
-
-				final var peerId = inputStream.readNBytes(20);
-
-				System.out.println("Peer ID: %s".formatted(HEX_FORMAT.formatHex(peerId)));
-			}
+		try (final var peer = Peer.connect(socket, torrent)) {
+			System.out.println("Peer ID: %s".formatted(HEX_FORMAT.formatHex(peer.getId())));
 		}
 	}
 
