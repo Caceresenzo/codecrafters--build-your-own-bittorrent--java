@@ -11,13 +11,13 @@ public record BEncoded<T>(
 	public BEncoded(byte[] serialized) throws IOException {
 		this(
 			serialized,
-			(T) new Deserializer(serialized).parse()
+			(T) new BencodeDeserializer(serialized).parse()
 		);
 	}
 
 	public BEncoded(T deserialized) throws IOException {
 		this(
-			new Serializer().writeAsBytes(deserialized),
+			new BencodeSerializer().writeAsBytes(deserialized),
 			deserialized
 		);
 	}

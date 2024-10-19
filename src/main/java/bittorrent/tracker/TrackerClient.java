@@ -3,7 +3,7 @@ package bittorrent.tracker;
 import java.io.IOException;
 import java.util.Map;
 
-import bittorrent.bencode.Deserializer;
+import bittorrent.bencode.BencodeDeserializer;
 import bittorrent.util.DigestUtils;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
@@ -42,7 +42,7 @@ public class TrackerClient {
 			}
 
 			try (final var inputStream = responseBody.byteStream()) {
-				final var deserializer = new Deserializer(inputStream);
+				final var deserializer = new BencodeDeserializer(inputStream);
 				final var root = deserializer.parse();
 
 				return AnnounceResponse.of((Map<String, Object>) root, selfPort);

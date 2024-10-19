@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
-public class Serializer {
+public class BencodeSerializer {
 
 	public static final byte INTEGER_BYTE = 'i';
 	public static final byte COLON_BYTE = ':';

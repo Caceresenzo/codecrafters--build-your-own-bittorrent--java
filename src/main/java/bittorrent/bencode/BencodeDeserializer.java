@@ -10,19 +10,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
-public class Deserializer {
+public class BencodeDeserializer {
 
 	private final InputStream inputStream;
 
-	public Deserializer(String input) {
+	public BencodeDeserializer(String input) {
 		this(new ByteArrayInputStream(input.getBytes()));
 	}
 
-	public Deserializer(byte[] input) {
+	public BencodeDeserializer(byte[] input) {
 		this(new ByteArrayInputStream(input));
 	}
 
-	public Deserializer(InputStream inputStream) {
+	public BencodeDeserializer(InputStream inputStream) {
 		if (!inputStream.markSupported()) {
 			inputStream = new BufferedInputStream(inputStream);
 		}
@@ -30,9 +30,22 @@ public class Deserializer {
 		this.inputStream = inputStream;
 	}
 
-	public Object parse() throws IOException {
-		final var first = peek();
+	public List<Object> parseMultiple() throws IOException {
+		final var objects = new ArrayList<Object>();
 
+		int first;
+		while ((first = peek()) != -1) {
+			objects.add(doParse(first));
+		}
+
+		return objects;
+	}
+
+	public Object parse() throws IOException {
+		return doParse(peek());
+	}
+
+	private Object doParse(final int first) throws IOException {
 		if (Character.isDigit(first)) {
 			return parseString();
 		}

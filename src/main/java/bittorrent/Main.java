@@ -11,7 +11,7 @@ import java.util.Map;
 
 import com.google.gson.Gson;
 
-import bittorrent.bencode.Deserializer;
+import bittorrent.bencode.BencodeDeserializer;
 import bittorrent.magnet.Magnet;
 import bittorrent.peer.Peer;
 import bittorrent.peer.protocol.MetadataMessageType;
@@ -47,7 +47,7 @@ public class Main {
 	private static void decode(String encoded) throws IOException {
 		final var gson = new Gson();
 
-		final var decoded = new Deserializer(encoded).parse();
+		final var decoded = new BencodeDeserializer(encoded).parse();
 
 		System.out.println(gson.toJson(decoded));
 	}
@@ -149,10 +149,9 @@ public class Main {
 			System.out.println("Peer ID: %s".formatted(HEX_FORMAT.formatHex(peer.getId())));
 			peer.awaitBitfield();
 
-			var response = peer.sendMetadata(MetadataMessageType.REQUEST, Map.of("piece", 0)).content().deserialized();
-			response = peer.sendMetadata(MetadataMessageType.DATA, response).content().deserialized();
+			final var response = peer.sendMetadata(MetadataMessageType.REQUEST, Map.of("piece", 0));
+			final var torrentInfo = TorrentInfo.of(response.data().deserialized());
 
-			final var torrentInfo = TorrentInfo.of(response);
 			info(magnet.announce(), torrentInfo);
 		}
 	}
@@ -160,7 +159,7 @@ public class Main {
 	@SuppressWarnings("unchecked")
 	private static Torrent load(String path) throws IOException {
 		final var content = Files.readAllBytes(Paths.get(path));
-		final var decoded = new Deserializer(content).parse();
+		final var decoded = new BencodeDeserializer(content).parse();
 
 		return Torrent.of((Map<String, Object>) decoded);
 	}

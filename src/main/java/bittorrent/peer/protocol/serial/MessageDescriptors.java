@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.function.Supplier;
 
 import bittorrent.bencode.BEncoded;
+import bittorrent.bencode.BencodeDeserializer;
 import bittorrent.peer.protocol.Message;
 import lombok.experimental.UtilityClass;
 
@@ -196,6 +197,7 @@ public class MessageDescriptors {
 		)
 	);
 
+	@SuppressWarnings("unchecked")
 	public static final MessageDescriptor<Message.Extension> EXTENSION = register(
 		Message.Extension.class,
 		(byte) 20,
@@ -207,10 +209,21 @@ public class MessageDescriptors {
 
 			return 1 + 1 + serializedContent.length;
 		},
-		(payloadLength, input) -> new Message.Extension(
-			input.readByte(),
-			new BEncoded<>(input.readNBytes(payloadLength - 1))
-		)
+		(payloadLength, input) -> {
+			final var id = input.readByte();
+
+			final var raw = input.readNBytes(payloadLength - 1);
+			final var parsed = new BencodeDeserializer(raw).parseMultiple();
+
+			final var content = (Map<String, Object>) parsed.getFirst();
+			final var extra = (Map<String, Object>) (parsed.size() > 1 ? parsed.get(1) : null);
+
+			return new Message.Extension(
+				id,
+				new BEncoded<>(null, content),
+				new BEncoded<>(null, extra)
+			);
+		}
 	);
 
 }

@@ -5,7 +5,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 
-import bittorrent.bencode.Serializer;
+import bittorrent.bencode.BencodeSerializer;
 import lombok.SneakyThrows;
 import lombok.experimental.UtilityClass;
 
@@ -20,7 +20,7 @@ public class DigestUtils {
 	@SneakyThrows
 	public static byte[] shaInfo(final Object infoRoot) {
 		final var infoOutputStream = new ByteArrayOutputStream();
-		new Serializer().write(infoRoot, infoOutputStream);
+		new BencodeSerializer().write(infoRoot, infoOutputStream);
 
 		return sha1(infoOutputStream.toByteArray());
 	}
