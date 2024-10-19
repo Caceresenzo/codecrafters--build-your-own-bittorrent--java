@@ -22,7 +22,10 @@ public record AnnounceResponse(
 			System.out.println("AnnounceResponse: %s".formatted(root));
 		}
 
-		final var interval = (long) root.get("interval");
+		var interval = (Long) root.get("interval");
+		if (interval == null) {
+			interval = (long) root.get("mininterval");
+		}
 
 		final var peersString = ((String) root.get("peers")).getBytes(StandardCharsets.ISO_8859_1);
 		final var peers = new ArrayList<InetSocketAddress>();
