@@ -1,14 +1,12 @@
 package bittorrent.tracker;
 
-import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
 import bittorrent.Main;
+import bittorrent.util.NetworkUtils;
 import lombok.SneakyThrows;
 
 public record AnnounceResponse(
@@ -17,9 +15,9 @@ public record AnnounceResponse(
 ) {
 
 	@SneakyThrows
-	public static AnnounceResponse of(Map<String, Object> root) {
+	public static AnnounceResponse of(Map<String, Object> root, short selfPort) {
 		if (Main.DEBUG) {
-			System.out.println("AnnounceResponse: %s".formatted(root));
+			System.err.println("AnnounceResponse: %s".formatted(root));
 		}
 
 		var interval = (Long) root.get("interval");
@@ -27,16 +25,13 @@ public record AnnounceResponse(
 			interval = (long) root.get("mininterval");
 		}
 
-		final var peersString = ((String) root.get("peers")).getBytes(StandardCharsets.ISO_8859_1);
 		final var peers = new ArrayList<InetSocketAddress>();
+		peers.addAll(NetworkUtils.parseV4SocketAddresses((String) root.get("peers")));
+		peers.addAll(NetworkUtils.parseV6SocketAddresses((String) root.get("peers6")));
 
-		for (var start = 0; start < peersString.length; start += 6) {
-			final var address = Arrays.copyOfRange(peersString, start, start + 4);
-			final var port = ((peersString[start + 4] & 0xff) << 8) + (peersString[start + 5] & 0xff);
-
-			final var peer = new InetSocketAddress(InetAddress.getByAddress(address), port);
-			peers.add(peer);
-		}
+		// peers.removeIf((x) -> x.getPort() == selfPort);
+		// peers.removeIf((x) -> x.getAddress() instanceof Inet4Address);
+		System.out.println(peers);
 
 		return new AnnounceResponse(interval, peers);
 	}
