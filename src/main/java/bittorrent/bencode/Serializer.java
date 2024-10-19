@@ -1,5 +1,6 @@
 package bittorrent.bencode;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -13,6 +14,13 @@ public class Serializer {
 	public static final byte END_BYTE = 'e';
 	public static final byte LIST_BYTE = 'l';
 	public static final byte MAP_BYTE = 'd';
+
+	public byte[] writeAsBytes(Object root) throws IOException {
+		final var byteArrayOutputStream = new ByteArrayOutputStream();
+		write(root, byteArrayOutputStream);
+
+		return byteArrayOutputStream.toByteArray();
+	}
 
 	public void write(Object root, OutputStream outputStream) throws IOException {
 		if (root instanceof String string) {

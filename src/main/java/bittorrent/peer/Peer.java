@@ -8,8 +8,10 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Map;
 import java.util.function.Predicate;
 
+import bittorrent.Main;
 import bittorrent.magnet.Magnet;
 import bittorrent.peer.protocol.Message;
 import bittorrent.peer.protocol.serial.MessageDescriptor;
@@ -28,12 +30,14 @@ public class Peer implements AutoCloseable {
 
 	private final @Getter byte[] id;
 	private final Socket socket;
+	private boolean supportExtensions;
 	private boolean bitfield;
 	private boolean interested;
 
-	public Peer(byte[] id, Socket socket) {
+	public Peer(byte[] id, Socket socket, boolean supportExtensions) {
 		this.id = id;
 		this.socket = socket;
+		this.supportExtensions = supportExtensions;
 	}
 
 	private Message doReceive() throws IOException {
@@ -45,7 +49,7 @@ public class Peer implements AutoCloseable {
 		final var descriptor = MessageDescriptors.getByTypeId(typeId);
 		final var message = descriptor.deserialize(length - 1, dataInputStream);
 
-		System.err.println("recv: length=%-6d message=%s".formatted(length, message));
+		System.err.println("recv: typeId=%-2d length=%-6d message=%s".formatted(descriptor.typeId(), length, message));
 
 		return message;
 	}
@@ -82,7 +86,7 @@ public class Peer implements AutoCloseable {
 		final var byteArrayOutputStream = new ExposedByteArrayOutputStream();
 		final var length = descriptor.serialize(message, new DataOutputStream(byteArrayOutputStream));
 
-		System.err.println("send: length=%-6d message=%s".formatted(length, message));
+		System.err.println("send: typeId=%-2d length=%-6d message=%s".formatted(descriptor.typeId(), length, message));
 
 		dataOutputStream.writeInt(length);
 		if (length == 0) {
@@ -93,7 +97,7 @@ public class Peer implements AutoCloseable {
 		dataOutputStream.write(byteArrayOutputStream.getBuffer(), 0, length - 1);
 	}
 
-	public void awaitBitfield() throws IOException {
+	public void await() throws IOException {
 		if (bitfield) {
 			return;
 		}
@@ -104,10 +108,15 @@ public class Peer implements AutoCloseable {
 		}
 
 		bitfield = true;
+
+		if (supportExtensions) {
+			send(new Message.Extension((byte) 0, Map.of("m", Map.of("ut_metadata", 42))));
+			System.out.println(receive());
+		}
 	}
 
 	public byte[] downloadPiece(Torrent torrent, int pieceIndex) throws IOException, InterruptedException {
-		awaitBitfield();
+		await();
 		sendInterested();
 
 		final var fileLength = torrent.info().length();
@@ -186,8 +195,9 @@ public class Peer implements AutoCloseable {
 	}
 
 	public static Peer connect(InetSocketAddress address, Announceable announceable) throws IOException {
-		final var socket = new Socket(address.getAddress(), address.getPort());
+		System.err.println("peer: trying to connect: %s".formatted(address));
 
+		final var socket = new Socket(address.getAddress(), address.getPort());
 		return connect(socket, announceable);
 	}
 
@@ -196,7 +206,7 @@ public class Peer implements AutoCloseable {
 		final var padding = announceable instanceof Magnet ? PADDING_MAGNET_8 : PADDING_8;
 
 		try {
-			final var inputStream = socket.getInputStream();
+			final var inputStream = new DataInputStream(socket.getInputStream());
 			final var outputStream = socket.getOutputStream();
 
 			{
@@ -213,22 +223,26 @@ public class Peer implements AutoCloseable {
 				outputStream.write(announceable.getInfoHash());
 
 				/* peer id */
-				outputStream.write("00112233445566778899".getBytes(StandardCharsets.US_ASCII));
+				outputStream.write("42112233445566778899".getBytes(StandardCharsets.US_ASCII));
 			}
 
 			{
-				final var length = inputStream.read();
+				final var length = inputStream.readByte();
 				if (length != 19) {
 					throw new IllegalStateException("invalid protocol length: " + length);
 				}
 
 				final var receivedProtocol = inputStream.readNBytes(19);
 				if (!Arrays.equals(receivedProtocol, PROTOCOL_BYTES)) {
-					throw new IllegalStateException("invalid protocol string: " + receivedProtocol);
+					System.out.println(Main.HEX_FORMAT.formatHex(receivedProtocol));
+					throw new IllegalStateException("invalid protocol string: " + new String(receivedProtocol));
 				}
 
 				/* padding */
-				inputStream.readNBytes(8);
+				final var receivedPadding = inputStream.readNBytes(8);
+				final var supportExtensions = receivedPadding[5] == 0x10; // TODO Bugged https://forum.codecrafters.io/t/pk2-reserved-bit-in-handshake-for-extension-protocol-seems-to-be-set-incorrectly-by-codecrafters-server/2461
+				//				final var supportExtensions = announceable instanceof Magnet;
+				System.err.println("peer: padding: %s".formatted(Main.HEX_FORMAT.formatHex(receivedPadding)));
 
 				final var receivedInfoHash = inputStream.readNBytes(20);
 				if (!Arrays.equals(receivedInfoHash, infoHash)) {
@@ -236,7 +250,7 @@ public class Peer implements AutoCloseable {
 				}
 
 				final var peerId = inputStream.readNBytes(20);
-				return new Peer(peerId, socket);
+				return new Peer(peerId, socket, supportExtensions);
 			}
 		} catch (Exception exception) {
 			socket.close();
