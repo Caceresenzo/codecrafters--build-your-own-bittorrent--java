@@ -19,7 +19,7 @@ public record AnnounceResponse(
 	@SneakyThrows
 	public static AnnounceResponse of(Map<String, Object> root) {
 		if (Main.DEBUG) {
-			System.out.println("AnnounceResponse: %s".formatted(root));
+			System.err.println("AnnounceResponse: %s".formatted(root));
 		}
 
 		var interval = (Long) root.get("interval");

@@ -4,6 +4,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Supplier;
 
+import bittorrent.bencode.BEncoded;
 import bittorrent.peer.protocol.Message;
 import lombok.experimental.UtilityClass;
 
@@ -199,11 +200,17 @@ public class MessageDescriptors {
 		Message.Extension.class,
 		(byte) 20,
 		(message, output) -> {
-			throw new UnsupportedOperationException();
+			final var serializedContent = message.content().serialized();
+
+			output.writeByte(message.id());
+			output.write(serializedContent);
+
+			return 1 + 1 + serializedContent.length;
 		},
-		(payloadLength, input) -> {
-			throw new UnsupportedOperationException();
-		}
+		(payloadLength, input) -> new Message.Extension(
+			input.readByte(),
+			new BEncoded<>(input.readNBytes(payloadLength - 1))
+		)
 	);
 
 }

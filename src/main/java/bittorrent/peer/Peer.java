@@ -8,8 +8,10 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Map;
 import java.util.function.Predicate;
 
+import bittorrent.Main;
 import bittorrent.magnet.Magnet;
 import bittorrent.peer.protocol.Message;
 import bittorrent.peer.protocol.serial.MessageDescriptor;
@@ -28,12 +30,14 @@ public class Peer implements AutoCloseable {
 
 	private final @Getter byte[] id;
 	private final Socket socket;
+	private boolean supportExtensions;
 	private boolean bitfield;
 	private boolean interested;
 
-	public Peer(byte[] id, Socket socket) {
+	public Peer(byte[] id, Socket socket, boolean supportExtensions) {
 		this.id = id;
 		this.socket = socket;
+		this.supportExtensions = supportExtensions;
 	}
 
 	private Message doReceive() throws IOException {
@@ -45,7 +49,7 @@ public class Peer implements AutoCloseable {
 		final var descriptor = MessageDescriptors.getByTypeId(typeId);
 		final var message = descriptor.deserialize(length - 1, dataInputStream);
 
-		System.err.println("recv: length=%-6d message=%s".formatted(length, message));
+		System.err.println("recv: typeId=%-2d length=%-6d message=%s".formatted(descriptor.typeId(), length, message));
 
 		return message;
 	}
@@ -82,7 +86,7 @@ public class Peer implements AutoCloseable {
 		final var byteArrayOutputStream = new ExposedByteArrayOutputStream();
 		final var length = descriptor.serialize(message, new DataOutputStream(byteArrayOutputStream));
 
-		System.err.println("send: length=%-6d message=%s".formatted(length, message));
+		System.err.println("send: typeId=%-2d length=%-6d message=%s".formatted(descriptor.typeId(), length, message));
 
 		dataOutputStream.writeInt(length);
 		if (length == 0) {
@@ -104,6 +108,11 @@ public class Peer implements AutoCloseable {
 		}
 
 		bitfield = true;
+
+		if (supportExtensions) {
+			send(new Message.Extension((byte) 0, Map.of("m", Map.of("ut_metadata", "42"))));
+			System.out.println(receive());
+		}
 	}
 
 	public byte[] downloadPiece(Torrent torrent, int pieceIndex) throws IOException, InterruptedException {
@@ -228,7 +237,9 @@ public class Peer implements AutoCloseable {
 				}
 
 				/* padding */
-				inputStream.readNBytes(8);
+				final var receivedPadding = inputStream.readNBytes(8);
+				final var supportExtensions = receivedPadding[5] == 0x10;
+				System.err.println("peer: padding: %s".formatted(Main.HEX_FORMAT.formatHex(receivedPadding)));
 
 				final var receivedInfoHash = inputStream.readNBytes(20);
 				if (!Arrays.equals(receivedInfoHash, infoHash)) {
@@ -236,7 +247,7 @@ public class Peer implements AutoCloseable {
 				}
 
 				final var peerId = inputStream.readNBytes(20);
-				return new Peer(peerId, socket);
+				return new Peer(peerId, socket, supportExtensions);
 			}
 		} catch (Exception exception) {
 			socket.close();
