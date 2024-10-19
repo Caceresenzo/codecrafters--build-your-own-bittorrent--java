@@ -8,9 +8,9 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayDeque;
 import java.util.Arrays;
-import java.util.Deque;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Predicate;
 
@@ -39,14 +39,14 @@ public class Peer implements AutoCloseable {
 	private boolean interested;
 	private @Getter int peerMetadataExtensionId = -1;
 
-	private Deque<Message> receiveQueue;
+	private List<Message> receiveQueue;
 
 	public Peer(byte[] id, Socket socket, boolean supportExtensions) {
 		this.id = id;
 		this.socket = socket;
 		this.supportExtensions = supportExtensions;
 
-		this.receiveQueue = new ArrayDeque<>();
+		this.receiveQueue = new LinkedList<>();
 	}
 
 	private Message doReceive() throws IOException {
@@ -71,7 +71,7 @@ public class Peer implements AutoCloseable {
 
 	public Message receive(boolean lookAtQueue) throws IOException {
 		if (lookAtQueue && !receiveQueue.isEmpty()) {
-			final var message = receiveQueue.pop();
+			final var message = receiveQueue.removeFirst();
 
 			System.err.println("queue recv: message=%s".formatted(message));
 
@@ -89,6 +89,18 @@ public class Peer implements AutoCloseable {
 	}
 
 	public Message waitFor(Predicate<Message> predicate) throws IOException {
+		final var iterator = receiveQueue.listIterator();
+		while (iterator.hasNext()) {
+			final var message = iterator.next();
+
+			if (predicate.test(message)) {
+				System.err.println("wait for: found: message=%s".formatted(message));
+
+				iterator.remove();
+				return message;
+			}
+		}
+
 		while (true) {
 			final var message = receive(false);
 
@@ -97,22 +109,13 @@ public class Peer implements AutoCloseable {
 			}
 
 			System.err.println("wait for: push: message=%s".formatted(message));
-			receiveQueue.push(message);
+			receiveQueue.add(message);
 		}
 	}
 
 	@SuppressWarnings("unchecked")
 	public <T extends Message> T waitFor(Class<T> clazz) throws IOException {
-		while (true) {
-			final var message = receive(false);
-
-			if (clazz.equals(message.getClass())) {
-				return (T) message;
-			}
-
-			System.err.println("wait for: push: message=%s".formatted(message));
-			receiveQueue.push(message);
-		}
+		return (T) waitFor((message) -> clazz.equals(message.getClass()));
 	}
 
 	@SuppressWarnings({ "rawtypes", "unchecked" })
@@ -136,23 +139,19 @@ public class Peer implements AutoCloseable {
 	}
 
 	@SuppressWarnings("rawtypes")
-	public void awaitExtension() throws IOException {
-		if (supportExtensions) {
-			return;
-		}
-
-		send(new Message.Extension((byte) 0, Map.of("m", Map.of("ut_metadata", 42))));
-
-		final var extension = waitFor(Message.Extension.class);
-		System.err.println("extension: %s".formatted(extension));
-
-		final var metadata = (Map) extension.content().deserialized().get("m");
-		peerMetadataExtensionId = ((Number) metadata.get("ut_metadata")).intValue();
-	}
-
 	public void awaitBitfield() throws IOException {
 		if (bitfield) {
 			return;
+		}
+
+		if (supportExtensions) {
+			send(new Message.Extension((byte) 0, Map.of("m", Map.of("ut_metadata", 42))));
+
+			final var extension = waitFor(Message.Extension.class);
+			System.err.println("extension: %s".formatted(extension));
+
+			final var metadata = (Map) extension.content().deserialized().get("m");
+			peerMetadataExtensionId = ((Number) metadata.get("ut_metadata")).intValue();
 		}
 
 		waitFor(Message.Bitfield.class);
