@@ -11,18 +11,13 @@ import java.util.Arrays;
 import java.util.function.Predicate;
 
 import bittorrent.magnet.Magnet;
-import bittorrent.peer.message.BitfieldMessage;
-import bittorrent.peer.message.ChokeMessage;
-import bittorrent.peer.message.InterestedMessage;
-import bittorrent.peer.message.KeepAliveMessage;
-import bittorrent.peer.message.Message;
-import bittorrent.peer.message.MessageType;
-import bittorrent.peer.message.PieceMessage;
-import bittorrent.peer.message.RequestMessage;
-import bittorrent.peer.message.UnchokeMessage;
+import bittorrent.peer.protocol.Message;
+import bittorrent.peer.protocol.serial.MessageDescriptor;
+import bittorrent.peer.protocol.serial.MessageDescriptors;
 import bittorrent.torrent.Torrent;
 import bittorrent.tracker.Announceable;
 import bittorrent.util.DigestUtils;
+import bittorrent.util.ExposedByteArrayOutputStream;
 import lombok.Getter;
 
 public class Peer implements AutoCloseable {
@@ -42,21 +37,16 @@ public class Peer implements AutoCloseable {
 	}
 
 	private Message doReceive() throws IOException {
-		final var inputStream = socket.getInputStream();
-		final var dataInputStream = new DataInputStream(inputStream);
+		final var dataInputStream = new DataInputStream(socket.getInputStream());
 
 		final var length = dataInputStream.readInt();
-		if (length == 0) {
-			return new KeepAliveMessage();
-		}
+		final var typeId = length != 0 ? dataInputStream.readByte() : (byte) -1;
 
-		final var typeId = (int) dataInputStream.readByte();
-		final var messageType = MessageType.valueOf(typeId);
+		final var descriptor = MessageDescriptors.getByTypeId(typeId);
+		System.out.println("about to receive: " + descriptor);
+		final var message = descriptor.deserialize(length - 1, dataInputStream);
 
-		final var payloadLength = length - 1;
-		final var message = messageType.getDeserializer().deserialize(payloadLength, dataInputStream);
-
-		System.err.println("recv: type=%s length=%d message=%s".formatted(messageType, length, message));
+		System.err.println("recv: type=%s length=%d message=%s".formatted(message.getClass().getSimpleName(), length, message));
 
 		return message;
 	}
@@ -64,7 +54,7 @@ public class Peer implements AutoCloseable {
 	public Message receive() throws IOException {
 		var message = doReceive();
 
-		if (message instanceof KeepAliveMessage) {
+		if (message instanceof Message.KeepAlive) {
 			send(message);
 			return receive();
 		}
@@ -72,7 +62,7 @@ public class Peer implements AutoCloseable {
 		return message;
 	}
 
-	public Message waitFor(Predicate<Message> predicate) throws InterruptedException, IOException {
+	public Message waitFor(Predicate<Message> predicate) throws IOException {
 		while (true) {
 			final var message = receive();
 
@@ -84,24 +74,24 @@ public class Peer implements AutoCloseable {
 		}
 	}
 
+	@SuppressWarnings({ "rawtypes", "unchecked" })
 	public void send(Message message) throws IOException {
-		final var outputStream = socket.getOutputStream();
-		final var dataOutputStream = new DataOutputStream(outputStream);
+		final var dataOutputStream = new DataOutputStream(socket.getOutputStream());
 
-		final var length = message.length();
+		final MessageDescriptor descriptor = MessageDescriptors.getByClass(message.getClass());
+
+		final var byteArrayOutputStream = new ExposedByteArrayOutputStream();
+		final var length = descriptor.serialize(message, new DataOutputStream(byteArrayOutputStream));
+
+		System.err.println("send: type=%s length=%d message=%s".formatted(descriptor.clazz().getSimpleName(), length, message));
+
 		dataOutputStream.writeInt(length);
-
 		if (length == 0) {
 			return;
 		}
 
-		final var messageType = message.type();
-		final var typeId = (byte) messageType.ordinal();
-		dataOutputStream.writeByte(typeId);
-
-		System.err.println("send: type=%s length=%d message=%s".formatted(messageType, length, message));
-
-		message.serialize(dataOutputStream);
+		dataOutputStream.writeByte(descriptor.typeId());
+		dataOutputStream.write(byteArrayOutputStream.getBuffer(), 0, length - 1);
 	}
 
 	public void awaitBitfield() throws IOException {
@@ -110,7 +100,7 @@ public class Peer implements AutoCloseable {
 		}
 
 		final var message = receive();
-		if (!(message instanceof BitfieldMessage)) {
+		if (!(message instanceof Message.Bitfield)) {
 			throw new IllegalStateException("first message is not bitfield: " + message);
 		}
 
@@ -140,7 +130,7 @@ public class Peer implements AutoCloseable {
 		for (; blockStart < realPieceLength - blockSize; blockStart += blockSize) {
 			++blockCount;
 
-			send(new RequestMessage(
+			send(new Message.Request(
 				pieceIndex,
 				blockStart,
 				blockSize
@@ -151,7 +141,7 @@ public class Peer implements AutoCloseable {
 		if (remaining != 0) {
 			++blockCount;
 
-			send(new RequestMessage(
+			send(new Message.Request(
 				pieceIndex,
 				blockStart,
 				remaining
@@ -159,7 +149,7 @@ public class Peer implements AutoCloseable {
 		}
 
 		for (var index = 0; index < blockCount; ++index) {
-			final var pieceMessage = (PieceMessage) waitFor((message) -> message instanceof PieceMessage);
+			final var pieceMessage = (Message.Piece) waitFor((message) -> message instanceof Message.Piece);
 
 			System.arraycopy(pieceMessage.block(), 0, bytes, pieceMessage.begin(), pieceMessage.block().length);
 		}
@@ -178,10 +168,10 @@ public class Peer implements AutoCloseable {
 		}
 
 		while (true) {
-			send(new InterestedMessage());
+			send(new Message.Interested());
 
-			final var choke = waitFor((message) -> message instanceof UnchokeMessage || message instanceof ChokeMessage);
-			if (choke instanceof UnchokeMessage) {
+			final var choke = waitFor((message) -> message instanceof Message.Unchoke || message instanceof Message.Choke);
+			if (choke instanceof Message.Unchoke) {
 				interested = true;
 				break;
 			}
