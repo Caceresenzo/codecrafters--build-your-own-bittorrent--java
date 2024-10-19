@@ -27,8 +27,6 @@ import lombok.Getter;
 
 public class Peer implements AutoCloseable {
 
-	public static boolean DEBUG = true;
-
 	private static final byte[] PROTOCOL_BYTES = "BitTorrent protocol".getBytes(StandardCharsets.US_ASCII);
 	private static final byte[] PADDING_8 = new byte[8];
 	private static final byte[] PADDING_MAGNET_8 = { 0, 0, 0, 0, 0, 0x10, 0, 0 };
@@ -38,7 +36,7 @@ public class Peer implements AutoCloseable {
 	private boolean bitfield;
 	private boolean interested;
 
-	public Peer(byte[] id, Socket socket) throws IOException {
+	public Peer(byte[] id, Socket socket) {
 		this.id = id;
 		this.socket = socket;
 	}

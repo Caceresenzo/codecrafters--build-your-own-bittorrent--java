@@ -8,6 +8,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
+import bittorrent.Main;
 import lombok.SneakyThrows;
 
 public record AnnounceResponse(
@@ -17,6 +18,10 @@ public record AnnounceResponse(
 
 	@SneakyThrows
 	public static AnnounceResponse of(Map<String, Object> root) {
+		if (Main.DEBUG) {
+			System.out.println("AnnounceResponse: %s".formatted(root));
+		}
+
 		final var interval = (long) root.get("interval");
 
 		final var peersString = ((String) root.get("peers")).getBytes(StandardCharsets.ISO_8859_1);

@@ -19,6 +19,8 @@ import bittorrent.tracker.TrackerClient;
 import okhttp3.OkHttpClient;
 
 public class Main {
+	
+	public static final boolean DEBUG = true;
 
 	public static final HexFormat HEX_FORMAT = HexFormat.of();
 	public static final OkHttpClient CLIENT = new OkHttpClient();
