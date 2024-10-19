@@ -27,6 +27,8 @@ public class Serializer {
 			writeString(string, outputStream);
 		} else if (root instanceof Long number) {
 			writeNumber(number, outputStream);
+		} else if (root instanceof Integer number) {
+			writeNumber(number, outputStream);
 		} else if (root instanceof List<?> list) {
 			writeList(list, outputStream);
 		} else if (root instanceof Map<?, ?> map) {

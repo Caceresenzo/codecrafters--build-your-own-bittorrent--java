@@ -16,10 +16,11 @@ import bittorrent.magnet.Magnet;
 import bittorrent.peer.Peer;
 import bittorrent.torrent.Torrent;
 import bittorrent.tracker.TrackerClient;
+import lombok.SneakyThrows;
 import okhttp3.OkHttpClient;
 
 public class Main {
-	
+
 	public static final boolean DEBUG = true;
 
 	public static final HexFormat HEX_FORMAT = HexFormat.of();
@@ -127,6 +128,7 @@ public class Main {
 		System.out.println("Info Hash: %s".formatted(HEX_FORMAT.formatHex(magnet.hash())));
 	}
 
+	@SneakyThrows
 	private static void handshakeMagnet(String link) throws IOException, InterruptedException {
 		final var magnet = Magnet.parse(link);
 		System.out.println(magnet);
@@ -134,9 +136,10 @@ public class Main {
 		final var trackerClient = new TrackerClient();
 		final var firstPeer = trackerClient.announce(magnet).peers().getFirst();
 
+		//		final var firstPeer = new InetSocketAddress(InetAddress.getByName("2.204.166.236"), 51414);
+
 		try (final var peer = Peer.connect(firstPeer, magnet)) {
 			System.out.println("Peer ID: %s".formatted(HEX_FORMAT.formatHex(peer.getId())));
-			peer.await();
 		}
 	}
 

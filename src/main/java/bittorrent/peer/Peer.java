@@ -97,7 +97,7 @@ public class Peer implements AutoCloseable {
 		dataOutputStream.write(byteArrayOutputStream.getBuffer(), 0, length - 1);
 	}
 
-	public void await() throws IOException {
+	public void awaitBitfield() throws IOException {
 		if (bitfield) {
 			return;
 		}
@@ -108,15 +108,10 @@ public class Peer implements AutoCloseable {
 		}
 
 		bitfield = true;
-
-		if (supportExtensions) {
-			send(new Message.Extension((byte) 0, Map.of("m", Map.of("ut_metadata", 42))));
-			System.out.println(receive());
-		}
 	}
 
 	public byte[] downloadPiece(Torrent torrent, int pieceIndex) throws IOException, InterruptedException {
-		await();
+		awaitBitfield();
 		sendInterested();
 
 		final var fileLength = torrent.info().length();
@@ -250,7 +245,14 @@ public class Peer implements AutoCloseable {
 				}
 
 				final var peerId = inputStream.readNBytes(20);
-				return new Peer(peerId, socket, supportExtensions);
+				final var peer = new Peer(peerId, socket, supportExtensions);
+
+				if (supportExtensions) {
+					peer.send(new Message.Extension((byte) 0, Map.of("m", Map.of("ut_metadata", 42))));
+					System.out.println(peer.receive());
+				}
+
+				return peer;
 			}
 		} catch (Exception exception) {
 			socket.close();
