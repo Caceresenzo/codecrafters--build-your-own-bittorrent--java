@@ -9,6 +9,7 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -17,6 +18,7 @@ import java.util.function.Predicate;
 import bittorrent.Main;
 import bittorrent.magnet.Magnet;
 import bittorrent.peer.protocol.Message;
+import bittorrent.peer.protocol.MetadataMessageType;
 import bittorrent.peer.protocol.serial.MessageDescriptor;
 import bittorrent.peer.protocol.serial.MessageDescriptors;
 import bittorrent.torrent.Torrent;
@@ -301,15 +303,16 @@ public class Peer implements AutoCloseable {
 		}
 	}
 
-	public Message.Extension sendMetadataRequest(int piece) throws IOException {
+	public Message.Extension sendMetadata(MetadataMessageType messageType, Map<String, ?> content) throws IOException {
+		final var body = HashMap.<String, Object>newHashMap(content.size() + 1);
+		body.putAll(content);
+		body.put("msg_type", messageType.ordinal());
+
 		send(new Message.Extension(
 			(byte) metadataExtensionId,
-			Map.of(
-				"msg_type", 0,
-				"piece", piece
-			)
+			body
 		));
-		
+
 		return waitFor(Message.Extension.class);
 	}
 

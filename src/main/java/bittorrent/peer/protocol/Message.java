@@ -63,11 +63,12 @@ public sealed interface Message {
 
 	public record Extension(
 		byte id,
-		BEncoded<Map<String, ?>> content
+		BEncoded<Map<String, Object>> content
 	) implements Message {
 
+		@SuppressWarnings("unchecked")
 		public Extension(byte id, Map<String, ?> content) throws IOException {
-			this(id, new BEncoded<>(content));
+			this(id, new BEncoded<>((Map<String, Object>) content));
 		}
 
 	}

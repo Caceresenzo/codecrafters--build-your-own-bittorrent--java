@@ -14,7 +14,9 @@ import com.google.gson.Gson;
 import bittorrent.bencode.Deserializer;
 import bittorrent.magnet.Magnet;
 import bittorrent.peer.Peer;
+import bittorrent.peer.protocol.MetadataMessageType;
 import bittorrent.torrent.Torrent;
+import bittorrent.torrent.TorrentInfo;
 import bittorrent.tracker.TrackerClient;
 import okhttp3.OkHttpClient;
 
@@ -54,14 +56,7 @@ public class Main {
 		final var torrent = load(path);
 		final var info = torrent.info();
 
-		System.out.println("Tracker URL: %s".formatted(torrent.announce()));
-		System.out.println("Length: %d".formatted(info.length()));
-		System.out.println("Info Hash: %s".formatted(HEX_FORMAT.formatHex(info.hash())));
-		System.out.println("Piece Length: %d".formatted(info.pieceLength()));
-		System.out.println("Piece Hashes:");
-		for (final var hash : info.pieces()) {
-			System.out.println(HEX_FORMAT.formatHex(hash));
-		}
+		info(torrent.announce(), info);
 	}
 
 	private static void peers(String path) throws IOException {
@@ -154,8 +149,11 @@ public class Main {
 			System.out.println("Peer ID: %s".formatted(HEX_FORMAT.formatHex(peer.getId())));
 			peer.awaitBitfield();
 
-			final var response = peer.sendMetadataRequest(0);
-			System.out.println(response);
+			var response = peer.sendMetadata(MetadataMessageType.REQUEST, Map.of("piece", 0)).content().deserialized();
+			response = peer.sendMetadata(MetadataMessageType.DATA, response).content().deserialized();
+
+			final var torrentInfo = TorrentInfo.of(response);
+			info(magnet.announce(), torrentInfo);
 		}
 	}
 
@@ -165,6 +163,17 @@ public class Main {
 		final var decoded = new Deserializer(content).parse();
 
 		return Torrent.of((Map<String, Object>) decoded);
+	}
+
+	private static void info(String trackerUrl, TorrentInfo info) throws IOException {
+		System.out.println("Tracker URL: %s".formatted(trackerUrl));
+		System.out.println("Length: %d".formatted(info.length()));
+		System.out.println("Info Hash: %s".formatted(HEX_FORMAT.formatHex(info.hash())));
+		System.out.println("Piece Length: %d".formatted(info.pieceLength()));
+		System.out.println("Piece Hashes:");
+		for (final var hash : info.pieces()) {
+			System.out.println(HEX_FORMAT.formatHex(hash));
+		}
 	}
 
 }
