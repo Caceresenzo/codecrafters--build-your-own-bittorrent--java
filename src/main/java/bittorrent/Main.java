@@ -129,12 +129,14 @@ public class Main {
 
 	private static void handshakeMagnet(String link) throws IOException, InterruptedException {
 		final var magnet = Magnet.parse(link);
+		System.out.println(magnet);
 
 		final var trackerClient = new TrackerClient();
 		final var firstPeer = trackerClient.announce(magnet).peers().getFirst();
 
 		try (final var peer = Peer.connect(firstPeer, magnet)) {
 			System.out.println("Peer ID: %s".formatted(HEX_FORMAT.formatHex(peer.getId())));
+			peer.awaitBitfield();
 		}
 	}
 
