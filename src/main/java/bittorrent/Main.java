@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.Socket;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.HexFormat;
@@ -12,6 +13,7 @@ import java.util.Map;
 import com.google.gson.Gson;
 
 import bittorrent.bencode.Deserializer;
+import bittorrent.magnet.Magnet;
 import bittorrent.peer.Peer;
 import bittorrent.torrent.Torrent;
 import bittorrent.tracker.TrackerClient;
@@ -32,6 +34,7 @@ public class Main {
 			case "handshake" -> handshake(args[1], args[2]);
 			case "download_piece" -> downloadPiece(args[3], Integer.parseInt(args[4]), args[2]);
 			case "download" -> download(args[3], args[2]);
+			case "magnet_parse" -> parseMagnet(args[1]);
 			default -> System.out.println("Unknown command: " + command);
 		}
 	}
@@ -113,6 +116,13 @@ public class Main {
 				fileOutputStream.write(data);
 			}
 		}
+	}
+
+	private static void parseMagnet(String link) throws IOException, InterruptedException {
+		final var magnet = Magnet.parse(link);
+
+		System.out.println("Tracker URL: %s".formatted(magnet.announce()));
+		System.out.println("Info Hash: %s".formatted(HEX_FORMAT.formatHex(magnet.hash())));
 	}
 
 	@SuppressWarnings("unchecked")
