@@ -21,7 +21,7 @@ import bittorrent.peer.protocol.MetadataMessage;
 import bittorrent.peer.serial.MessageDescriptor;
 import bittorrent.peer.serial.MessageDescriptors;
 import bittorrent.peer.serial.MessageSerialContext;
-import bittorrent.torrent.Torrent;
+import bittorrent.torrent.TorrentInfo;
 import bittorrent.tracker.Announceable;
 import bittorrent.util.DigestUtils;
 import bittorrent.util.ExposedByteArrayOutputStream;
@@ -173,19 +173,19 @@ public class Peer implements AutoCloseable {
 		bitfield = true;
 	}
 
-	public byte[] downloadPiece(Torrent torrent, int pieceIndex) throws IOException, InterruptedException {
+	public byte[] downloadPiece(TorrentInfo torrentInfo, int pieceIndex) throws IOException, InterruptedException {
 		awaitBitfield();
 		sendInterested();
 
-		final var fileLength = torrent.info().length();
-		final var pieceLength = torrent.info().pieceLength();
+		final var fileLength = torrentInfo.length();
+		final var pieceLength = torrentInfo.pieceLength();
 
 		var realPieceLength = pieceLength;
-		if (torrent.info().pieces().size() - 1 == pieceIndex) {
+		if (torrentInfo.pieces().size() - 1 == pieceIndex) {
 			realPieceLength = (int) (fileLength % pieceLength);
 		}
 
-		final var pieceHash = torrent.info().pieces().get(pieceIndex);
+		final var pieceHash = torrentInfo.pieces().get(pieceIndex);
 
 		final var bytes = new byte[realPieceLength];
 
@@ -329,6 +329,17 @@ public class Peer implements AutoCloseable {
 			Message.Extension.class,
 			METADATA_CONTEXT
 		).content();
+	}
+
+	public TorrentInfo queryTorrentInfoViaMetadataExtension() throws IOException {
+		awaitBitfield();
+
+		final var response = sendMetadata(new MetadataMessage.Request(0));
+		if (!(response instanceof MetadataMessage.Data data)) {
+			throw new IllegalStateException("no data found: %s".formatted(response));
+		}
+
+		return data.torrentInfo();
 	}
 
 }

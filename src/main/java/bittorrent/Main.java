@@ -14,7 +14,6 @@ import com.google.gson.Gson;
 import bittorrent.bencode.BencodeDeserializer;
 import bittorrent.magnet.Magnet;
 import bittorrent.peer.Peer;
-import bittorrent.peer.protocol.MetadataMessage;
 import bittorrent.torrent.Torrent;
 import bittorrent.torrent.TorrentInfo;
 import bittorrent.tracker.TrackerClient;
@@ -40,6 +39,7 @@ public class Main {
 			case "magnet_parse" -> magnetParse(args[1]);
 			case "magnet_handshake" -> magnetHandshake(args[1]);
 			case "magnet_info" -> magnetInfo(args[1]);
+			case "magnet_download_piece" -> magnetDownloadPiece(args[3], Integer.parseInt(args[4]), args[2]);
 			default -> System.out.println("Unknown command: " + command);
 		}
 	}
@@ -85,6 +85,7 @@ public class Main {
 
 	private static void downloadPiece(String path, int pieceIndex, String outputPath) throws IOException, InterruptedException {
 		final var torrent = load(path);
+		final var torrentInfo = torrent.info();
 
 		final var trackerClient = new TrackerClient();
 		final var firstPeer = trackerClient.announce(torrent).peers().getFirst();
@@ -93,13 +94,14 @@ public class Main {
 			final var peer = Peer.connect(firstPeer, torrent);
 			final var fileOutputStream = new FileOutputStream(new File(outputPath));
 		) {
-			final var data = peer.downloadPiece(torrent, pieceIndex);
+			final var data = peer.downloadPiece(torrentInfo, pieceIndex);
 			fileOutputStream.write(data);
 		}
 	}
 
 	private static void download(String path, String outputPath) throws IOException, InterruptedException {
 		final var torrent = load(path);
+		final var torrentInfo = torrent.info();
 
 		final var trackerClient = new TrackerClient();
 		final var firstPeer = trackerClient.announce(torrent).peers().getFirst();
@@ -108,9 +110,10 @@ public class Main {
 			final var peer = Peer.connect(firstPeer, torrent);
 			final var fileOutputStream = new FileOutputStream(new File(outputPath));
 		) {
+
 			final var pieceCount = torrent.info().pieces().size();
 			for (var index = 0; index < pieceCount; ++index) {
-				final var data = peer.downloadPiece(torrent, index);
+				final var data = peer.downloadPiece(torrentInfo, index);
 				fileOutputStream.write(data);
 			}
 		}
@@ -143,18 +146,31 @@ public class Main {
 		final var trackerClient = new TrackerClient();
 		final var firstPeer = trackerClient.announce(magnet).peers().getFirst();
 
-		//		final var firstPeer = new java.net.InetSocketAddress(java.net.InetAddress.getByName("2.204.166.236"), 51414);
-
 		try (final var peer = Peer.connect(firstPeer, magnet)) {
 			System.out.println("Peer ID: %s".formatted(HEX_FORMAT.formatHex(peer.getId())));
-			peer.awaitBitfield();
 
-			final var response = peer.sendMetadata(new MetadataMessage.Request(0));
-			if (!(response instanceof MetadataMessage.Data data)) {
-				throw new IllegalStateException("no data found: %s".formatted(response));
-			}
+			final var torrentInfo = peer.queryTorrentInfoViaMetadataExtension();
+			info(magnet.announce(), torrentInfo);
+		}
+	}
 
-			info(magnet.announce(), data.torrentInfo());
+	private static void magnetDownloadPiece(String link, int pieceIndex, String outputPath) throws IOException, InterruptedException {
+		final var magnet = Magnet.parse(link);
+
+		final var trackerClient = new TrackerClient();
+		final var firstPeer = trackerClient.announce(magnet).peers().getFirst();
+
+		//		final var firstPeer = new java.net.InetSocketAddress(java.net.InetAddress.getByName("2.204.166.236"), 51414);
+
+		try (
+			final var peer = Peer.connect(firstPeer, magnet);
+			final var fileOutputStream = new FileOutputStream(new File(outputPath));
+		) {
+			final var torrentInfo = peer.queryTorrentInfoViaMetadataExtension();
+			info(magnet.announce(), torrentInfo);
+
+			final var data = peer.downloadPiece(torrentInfo, pieceIndex);
+			fileOutputStream.write(data);
 		}
 	}
 
@@ -171,6 +187,7 @@ public class Main {
 		System.out.println("Length: %d".formatted(info.length()));
 		System.out.println("Info Hash: %s".formatted(HEX_FORMAT.formatHex(info.hash())));
 		System.out.println("Piece Length: %d".formatted(info.pieceLength()));
+
 		System.out.println("Piece Hashes:");
 		for (final var hash : info.pieces()) {
 			System.out.println(HEX_FORMAT.formatHex(hash));
