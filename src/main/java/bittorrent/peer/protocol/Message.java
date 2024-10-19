@@ -63,10 +63,10 @@ public sealed interface Message {
 
 	public record Extension(
 		byte id,
-		BEncoded<Map<String, Object>> content
+		BEncoded<Map<String, ?>> content
 	) implements Message {
 
-		public Extension(byte id, Map<String, Object> content) throws IOException {
+		public Extension(byte id, Map<String, ?> content) throws IOException {
 			this(id, new BEncoded<>(content));
 		}
 

@@ -37,7 +37,7 @@ public class Peer implements AutoCloseable {
 
 	private boolean bitfield;
 	private boolean interested;
-	private @Getter int peerMetadataExtensionId = -1;
+	private @Getter int metadataExtensionId = -1;
 
 	private List<Message> receiveQueue;
 
@@ -151,7 +151,7 @@ public class Peer implements AutoCloseable {
 			System.err.println("extension: %s".formatted(extension));
 
 			final var metadata = (Map) extension.content().deserialized().get("m");
-			peerMetadataExtensionId = ((Number) metadata.get("ut_metadata")).intValue();
+			metadataExtensionId = ((Number) metadata.get("ut_metadata")).intValue();
 		}
 
 		waitFor(Message.Bitfield.class);
@@ -299,6 +299,18 @@ public class Peer implements AutoCloseable {
 			socket.close();
 			throw exception;
 		}
+	}
+
+	public Message.Extension sendMetadataRequest(int piece) throws IOException {
+		send(new Message.Extension(
+			(byte) metadataExtensionId,
+			Map.of(
+				"msg_type", 0,
+				"piece", piece
+			)
+		));
+		
+		return waitFor(Message.Extension.class);
 	}
 
 }

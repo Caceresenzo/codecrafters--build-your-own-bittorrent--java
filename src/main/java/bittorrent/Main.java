@@ -16,7 +16,6 @@ import bittorrent.magnet.Magnet;
 import bittorrent.peer.Peer;
 import bittorrent.torrent.Torrent;
 import bittorrent.tracker.TrackerClient;
-import lombok.SneakyThrows;
 import okhttp3.OkHttpClient;
 
 public class Main {
@@ -36,8 +35,9 @@ public class Main {
 			case "handshake" -> handshake(args[1], args[2]);
 			case "download_piece" -> downloadPiece(args[3], Integer.parseInt(args[4]), args[2]);
 			case "download" -> download(args[3], args[2]);
-			case "magnet_parse" -> parseMagnet(args[1]);
-			case "magnet_handshake" -> handshakeMagnet(args[1]);
+			case "magnet_parse" -> magnetParse(args[1]);
+			case "magnet_handshake" -> magnetHandshake(args[1]);
+			case "magnet_info" -> magnetInfo(args[1]);
 			default -> System.out.println("Unknown command: " + command);
 		}
 	}
@@ -121,15 +121,28 @@ public class Main {
 		}
 	}
 
-	private static void parseMagnet(String link) throws IOException, InterruptedException {
+	private static void magnetParse(String link) throws IOException, InterruptedException {
 		final var magnet = Magnet.parse(link);
 
 		System.out.println("Tracker URL: %s".formatted(magnet.announce()));
 		System.out.println("Info Hash: %s".formatted(HEX_FORMAT.formatHex(magnet.hash())));
 	}
 
-	@SneakyThrows
-	private static void handshakeMagnet(String link) throws IOException, InterruptedException {
+	private static void magnetHandshake(String link) throws IOException, InterruptedException {
+		final var magnet = Magnet.parse(link);
+
+		final var trackerClient = new TrackerClient();
+		final var firstPeer = trackerClient.announce(magnet).peers().getFirst();
+
+		try (final var peer = Peer.connect(firstPeer, magnet)) {
+			System.out.println("Peer ID: %s".formatted(HEX_FORMAT.formatHex(peer.getId())));
+			peer.awaitBitfield();
+
+			System.out.println("Peer Metadata Extension ID: %s".formatted(peer.getMetadataExtensionId()));
+		}
+	}
+
+	private static void magnetInfo(String link) throws IOException, InterruptedException {
 		final var magnet = Magnet.parse(link);
 
 		final var trackerClient = new TrackerClient();
@@ -141,7 +154,8 @@ public class Main {
 			System.out.println("Peer ID: %s".formatted(HEX_FORMAT.formatHex(peer.getId())));
 			peer.awaitBitfield();
 
-			System.out.println("Peer Metadata Extension ID: %s".formatted(peer.getPeerMetadataExtensionId()));
+			final var response = peer.sendMetadataRequest(0);
+			System.out.println(response);
 		}
 	}
 
