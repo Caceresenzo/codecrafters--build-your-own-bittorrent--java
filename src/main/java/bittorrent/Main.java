@@ -14,7 +14,7 @@ import com.google.gson.Gson;
 import bittorrent.bencode.BencodeDeserializer;
 import bittorrent.magnet.Magnet;
 import bittorrent.peer.Peer;
-import bittorrent.peer.protocol.MetadataMessageType;
+import bittorrent.peer.protocol.MetadataMessage;
 import bittorrent.torrent.Torrent;
 import bittorrent.torrent.TorrentInfo;
 import bittorrent.tracker.TrackerClient;
@@ -149,10 +149,12 @@ public class Main {
 			System.out.println("Peer ID: %s".formatted(HEX_FORMAT.formatHex(peer.getId())));
 			peer.awaitBitfield();
 
-			final var response = peer.sendMetadata(MetadataMessageType.REQUEST, Map.of("piece", 0));
-			final var torrentInfo = TorrentInfo.of(response.data().deserialized());
+			final var response = peer.sendMetadata(new MetadataMessage.Request(0));
+			if (!(response instanceof MetadataMessage.Data data)) {
+				throw new IllegalStateException("no data found: %s".formatted(response));
+			}
 
-			info(magnet.announce(), torrentInfo);
+			info(magnet.announce(), data.torrentInfo());
 		}
 	}
 

@@ -28,7 +28,11 @@ public class BencodeSerializer {
 		} else if (root instanceof Long number) {
 			writeNumber(number, outputStream);
 		} else if (root instanceof Integer number) {
-			writeNumber(number, outputStream);
+			writeNumber(Integer.toUnsignedLong(number), outputStream);
+		} else if (root instanceof Short number) {
+			writeNumber(Short.toUnsignedInt(number), outputStream);
+		} else if (root instanceof Byte number) {
+			writeNumber(Byte.toUnsignedInt(number), outputStream);
 		} else if (root instanceof List<?> list) {
 			writeList(list, outputStream);
 		} else if (root instanceof Map<?, ?> map) {

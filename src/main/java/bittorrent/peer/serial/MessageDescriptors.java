@@ -1,12 +1,14 @@
-package bittorrent.peer.protocol.serial;
+package bittorrent.peer.serial;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Supplier;
 
-import bittorrent.bencode.BEncoded;
 import bittorrent.bencode.BencodeDeserializer;
+import bittorrent.bencode.BencodeSerializer;
 import bittorrent.peer.protocol.Message;
+import bittorrent.peer.protocol.MetadataMessage;
+import bittorrent.peer.serial.extension.MetadataMessageSerial;
 import lombok.experimental.UtilityClass;
 
 @UtilityClass
@@ -39,8 +41,8 @@ public class MessageDescriptors {
 	private static <T extends Message> MessageDescriptor<T> register(
 		Class<T> clazz,
 		byte typeId,
-		MessageSerializer<T> serializer,
-		MessageDeserializer<T> deserializer
+		MessageDescriptor.Serializer<T> serializer,
+		MessageDescriptor.Deserializer<T> deserializer
 	) {
 		return register(new MessageDescriptor<>(
 			clazz,
@@ -61,8 +63,8 @@ public class MessageDescriptors {
 		return register(new MessageDescriptor<>(
 			clazz,
 			typeId,
-			(message, output) -> length,
-			(payloadLength, input) -> instance
+			(message, output, context) -> length,
+			(payloadLength, input, context) -> instance
 		));
 	}
 
@@ -106,12 +108,12 @@ public class MessageDescriptors {
 	public static final MessageDescriptor<Message.Have> HAVE = register(
 		Message.Have.class,
 		(byte) 4,
-		(message, output) -> {
+		(message, output, context) -> {
 			output.writeInt(message.pieceIndex());
 
 			return 1 + 4;
 		},
-		(payloadLength, input) -> new Message.Have(
+		(payloadLength, input, context) -> new Message.Have(
 			input.readInt()
 		)
 	);
@@ -119,14 +121,14 @@ public class MessageDescriptors {
 	public static final MessageDescriptor<Message.Bitfield> BITFIELD = register(
 		Message.Bitfield.class,
 		(byte) 5,
-		(message, output) -> {
+		(message, output, context) -> {
 			final var values = message.values();
 
 			output.write(values);
 
 			return 1 + values.length;
 		},
-		(payloadLength, input) -> new Message.Bitfield(
+		(payloadLength, input, context) -> new Message.Bitfield(
 			input.readNBytes(payloadLength)
 		)
 	);
@@ -134,14 +136,14 @@ public class MessageDescriptors {
 	public static final MessageDescriptor<Message.Request> REQUEST = register(
 		Message.Request.class,
 		(byte) 6,
-		(message, output) -> {
+		(message, output, context) -> {
 			output.writeInt(message.index());
 			output.writeInt(message.begin());
 			output.writeInt(message.length());
 
 			return 1 + 4 + 4 + 4;
 		},
-		(payloadLength, input) -> new Message.Request(
+		(payloadLength, input, context) -> new Message.Request(
 			input.readInt(),
 			input.readInt(),
 			input.readInt()
@@ -151,7 +153,7 @@ public class MessageDescriptors {
 	public static final MessageDescriptor<Message.Piece> PIECE = register(
 		Message.Piece.class,
 		(byte) 7,
-		(message, output) -> {
+		(message, output, context) -> {
 			final var block = message.block();
 
 			output.writeInt(message.index());
@@ -160,7 +162,7 @@ public class MessageDescriptors {
 
 			return 1 + 4 + 4 + block.length;
 		},
-		(payloadLength, input) -> new Message.Piece(
+		(payloadLength, input, context) -> new Message.Piece(
 			input.readInt(),
 			input.readInt(),
 			input.readNBytes(payloadLength - 8)
@@ -170,14 +172,14 @@ public class MessageDescriptors {
 	public static final MessageDescriptor<Message.Cancel> CANCEL = register(
 		Message.Cancel.class,
 		(byte) 8,
-		(message, output) -> {
+		(message, output, context) -> {
 			output.writeInt(message.index());
 			output.writeInt(message.begin());
 			output.writeInt(message.length());
 
 			return 1 + 4 + 4 + 4;
 		},
-		(payloadLength, input) -> new Message.Cancel(
+		(payloadLength, input, context) -> new Message.Cancel(
 			input.readInt(),
 			input.readInt(),
 			input.readInt()
@@ -187,42 +189,50 @@ public class MessageDescriptors {
 	public static final MessageDescriptor<Message.Port> PORT = register(
 		Message.Port.class,
 		(byte) 9,
-		(message, output) -> {
+		(message, output, context) -> {
 			output.writeShort(message.port());
 
 			return 1 + 2;
 		},
-		(payloadLength, input) -> new Message.Port(
+		(payloadLength, input, context) -> new Message.Port(
 			input.readShort()
 		)
 	);
 
-	@SuppressWarnings("unchecked")
 	public static final MessageDescriptor<Message.Extension> EXTENSION = register(
 		Message.Extension.class,
 		(byte) 20,
-		(message, output) -> {
-			final var serializedContent = message.content().serialized();
+		(message, output, context) -> {
+			final byte[] serializedContent;
+
+			final var extensionType = context.extensionType();
+			if (MetadataMessage.class.equals(extensionType)) {
+				final var content = MetadataMessageSerial.serialize((MetadataMessage) message.content());
+				serializedContent = new BencodeSerializer().writeAsBytes(content);
+			} else {
+				throw new UnsupportedOperationException("unknown extension: %s".formatted(extensionType.getName()));
+			}
 
 			output.writeByte(message.id());
 			output.write(serializedContent);
 
 			return 1 + 1 + serializedContent.length;
 		},
-		(payloadLength, input) -> {
+		(payloadLength, input, context) -> {
 			final var id = input.readByte();
-
 			final var raw = input.readNBytes(payloadLength - 1);
+			System.err.println(new String(raw));
 			final var parsed = new BencodeDeserializer(raw).parseMultiple();
 
-			final var content = (Map<String, Object>) parsed.getFirst();
-			final var extra = (Map<String, Object>) (parsed.size() > 1 ? parsed.get(1) : null);
-
-			return new Message.Extension(
-				id,
-				new BEncoded<>(null, content),
-				new BEncoded<>(null, extra)
-			);
+			final var extensionType = context.extensionType();
+			if (MetadataMessage.class.equals(extensionType)) {
+				return new Message.Extension(
+					id,
+					MetadataMessageSerial.deserialize(parsed)
+				);
+			} else {
+				throw new UnsupportedOperationException("unknown extension: %s".formatted(extensionType.getName()));
+			}
 		}
 	);
 

@@ -9,7 +9,6 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -18,9 +17,10 @@ import java.util.function.Predicate;
 import bittorrent.Main;
 import bittorrent.magnet.Magnet;
 import bittorrent.peer.protocol.Message;
-import bittorrent.peer.protocol.MetadataMessageType;
-import bittorrent.peer.protocol.serial.MessageDescriptor;
-import bittorrent.peer.protocol.serial.MessageDescriptors;
+import bittorrent.peer.protocol.MetadataMessage;
+import bittorrent.peer.serial.MessageDescriptor;
+import bittorrent.peer.serial.MessageDescriptors;
+import bittorrent.peer.serial.MessageSerialContext;
 import bittorrent.torrent.Torrent;
 import bittorrent.tracker.Announceable;
 import bittorrent.util.DigestUtils;
@@ -32,6 +32,8 @@ public class Peer implements AutoCloseable {
 	private static final byte[] PROTOCOL_BYTES = "BitTorrent protocol".getBytes(StandardCharsets.US_ASCII);
 	private static final byte[] PADDING_8 = new byte[8];
 	private static final byte[] PADDING_MAGNET_8 = { 0, 0, 0, 0, 0, 0x10, 0, 0 };
+
+	private static final MessageSerialContext METADATA_CONTEXT = new MessageSerialContext(MetadataMessage.class);
 
 	private final @Getter byte[] id;
 	private final Socket socket;
@@ -51,7 +53,7 @@ public class Peer implements AutoCloseable {
 		this.receiveQueue = new LinkedList<>();
 	}
 
-	private Message doReceive() throws IOException {
+	private Message doReceive(MessageSerialContext context) throws IOException {
 		final var dataInputStream = new DataInputStream(socket.getInputStream());
 
 		final int length;
@@ -64,14 +66,14 @@ public class Peer implements AutoCloseable {
 		final var typeId = length != 0 ? dataInputStream.readByte() : (byte) -1;
 
 		final var descriptor = MessageDescriptors.getByTypeId(typeId);
-		final var message = descriptor.deserialize(length - 1, dataInputStream);
+		final var message = descriptor.deserialize(length - 1, dataInputStream, context);
 
 		System.err.println("recv: typeId=%-2d length=%-6d message=%s".formatted(descriptor.typeId(), length, message));
 
 		return message;
 	}
 
-	public Message receive(boolean lookAtQueue) throws IOException {
+	public Message receive(boolean lookAtQueue, MessageSerialContext context) throws IOException {
 		if (lookAtQueue && !receiveQueue.isEmpty()) {
 			final var message = receiveQueue.removeFirst();
 
@@ -80,17 +82,17 @@ public class Peer implements AutoCloseable {
 			return message;
 		}
 
-		var message = doReceive();
+		var message = doReceive(context);
 
 		if (message instanceof Message.KeepAlive) {
-			send(message);
-			return receive(lookAtQueue);
+			send(message, context);
+			return receive(lookAtQueue, context);
 		}
 
 		return message;
 	}
 
-	public Message waitFor(Predicate<Message> predicate) throws IOException {
+	public Message waitFor(Predicate<Message> predicate, MessageSerialContext context) throws IOException {
 		final var iterator = receiveQueue.listIterator();
 		while (iterator.hasNext()) {
 			final var message = iterator.next();
@@ -104,7 +106,7 @@ public class Peer implements AutoCloseable {
 		}
 
 		while (true) {
-			final var message = receive(false);
+			final var message = receive(false, context);
 
 			if (predicate.test(message)) {
 				return message;
@@ -116,18 +118,22 @@ public class Peer implements AutoCloseable {
 	}
 
 	@SuppressWarnings("unchecked")
-	public <T extends Message> T waitFor(Class<T> clazz) throws IOException {
-		return (T) waitFor((message) -> clazz.equals(message.getClass()));
+	public <T extends Message> T waitFor(Class<T> clazz, MessageSerialContext context) throws IOException {
+		return (T) waitFor((message) -> clazz.equals(message.getClass()), context);
+	}
+
+	public void send(Message message) throws IOException {
+		send(message, null);
 	}
 
 	@SuppressWarnings({ "rawtypes", "unchecked" })
-	public void send(Message message) throws IOException {
+	public void send(Message message, MessageSerialContext context) throws IOException {
 		final var dataOutputStream = new DataOutputStream(socket.getOutputStream());
 
 		final MessageDescriptor descriptor = MessageDescriptors.getByClass(message.getClass());
 
 		final var byteArrayOutputStream = new ExposedByteArrayOutputStream();
-		final var length = descriptor.serialize(message, new DataOutputStream(byteArrayOutputStream));
+		final var length = descriptor.serialize(message, new DataOutputStream(byteArrayOutputStream), context);
 
 		System.err.println("send: typeId=%-2d length=%-6d message=%s".formatted(descriptor.typeId(), length, message));
 
@@ -140,23 +146,30 @@ public class Peer implements AutoCloseable {
 		dataOutputStream.write(byteArrayOutputStream.getBuffer(), 0, length - 1);
 	}
 
-	@SuppressWarnings("rawtypes")
 	public void awaitBitfield() throws IOException {
 		if (bitfield) {
 			return;
 		}
 
 		if (supportExtensions) {
-			send(new Message.Extension((byte) 0, Map.of("m", Map.of("ut_metadata", 42))));
+			send(
+				new Message.Extension(
+					(byte) 0,
+					new MetadataMessage.Handshake(Map.of(
+						"ut_metadata", (byte) 42
+					))
+				),
+				METADATA_CONTEXT
+			);
 
-			final var extension = waitFor(Message.Extension.class);
+			final var extension = waitFor(Message.Extension.class, METADATA_CONTEXT);
 			System.err.println("extension: %s".formatted(extension));
 
-			final var metadata = (Map) extension.content().deserialized().get("m");
-			metadataExtensionId = ((Number) metadata.get("ut_metadata")).intValue();
+			final var metadata = (MetadataMessage.Handshake) extension.content();
+			metadataExtensionId = metadata.extensionIds().get("ut_metadata");
 		}
 
-		waitFor(Message.Bitfield.class);
+		waitFor(Message.Bitfield.class, null);
 		bitfield = true;
 	}
 
@@ -202,9 +215,9 @@ public class Peer implements AutoCloseable {
 		}
 
 		for (var index = 0; index < blockCount; ++index) {
-			final var pieceMessage = (Message.Piece) waitFor((message) -> message instanceof Message.Piece);
+			final var piece = waitFor(Message.Piece.class, null);
 
-			System.arraycopy(pieceMessage.block(), 0, bytes, pieceMessage.begin(), pieceMessage.block().length);
+			System.arraycopy(piece.block(), 0, bytes, piece.begin(), piece.block().length);
 		}
 
 		final var downloadedPieceHash = DigestUtils.sha1(bytes);
@@ -223,7 +236,7 @@ public class Peer implements AutoCloseable {
 		while (true) {
 			send(new Message.Interested());
 
-			final var choke = waitFor((message) -> message instanceof Message.Unchoke || message instanceof Message.Choke);
+			final var choke = waitFor((message) -> message instanceof Message.Unchoke || message instanceof Message.Choke, null);
 			if (choke instanceof Message.Unchoke) {
 				interested = true;
 				break;
@@ -303,17 +316,19 @@ public class Peer implements AutoCloseable {
 		}
 	}
 
-	public Message.Extension sendMetadata(MetadataMessageType messageType, Map<String, ?> content) throws IOException {
-		final var body = HashMap.<String, Object>newHashMap(content.size() + 1);
-		body.putAll(content);
-		body.put("msg_type", messageType.ordinal());
+	public MetadataMessage sendMetadata(MetadataMessage message) throws IOException {
+		send(
+			new Message.Extension(
+				(byte) metadataExtensionId,
+				message
+			),
+			METADATA_CONTEXT
+		);
 
-		send(new Message.Extension(
-			(byte) metadataExtensionId,
-			body
-		));
-
-		return waitFor(Message.Extension.class);
+		return (MetadataMessage) waitFor(
+			Message.Extension.class,
+			METADATA_CONTEXT
+		).content();
 	}
 
 }
