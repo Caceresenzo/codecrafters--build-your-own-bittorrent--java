@@ -1,10 +1,5 @@
 package bittorrent.peer.protocol;
 
-import java.io.IOException;
-import java.util.Map;
-
-import bittorrent.bencode.BEncoded;
-
 public sealed interface Message {
 
 	public record KeepAlive() implements Message {}
@@ -63,15 +58,7 @@ public sealed interface Message {
 
 	public record Extension(
 		byte id,
-		BEncoded<Map<String, Object>> content,
-		BEncoded<Map<String, Object>> data
-	) implements Message {
-
-		@SuppressWarnings("unchecked")
-		public Extension(byte id, Map<String, ?> content) throws IOException {
-			this(id, new BEncoded<>((Map<String, Object>) content), null);
-		}
-
-	}
+		Object content
+	) implements Message {}
 
 }
