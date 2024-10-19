@@ -6,12 +6,13 @@ import java.util.Objects;
 import org.apache.http.client.utils.URLEncodedUtils;
 
 import bittorrent.Main;
+import bittorrent.tracker.Announceable;
 
 public record Magnet(
 	byte[] hash,
 	String displayName,
 	String announce
-) {
+) implements Announceable {
 
 	public static final String SCHEME = "magnet:";
 	public static final String HASH_PREFIX = "urn:btih:";
@@ -28,6 +29,21 @@ public record Magnet(
 			displayName,
 			announce
 		);
+	}
+
+	@Override
+	public String getTrackerUrl() {
+		return announce;
+	}
+
+	@Override
+	public byte[] getInfoHash() {
+		return hash;
+	}
+
+	@Override
+	public long getInfoLength() {
+		return 1;
 	}
 
 	public static Magnet parse(String link) {

@@ -4,7 +4,6 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.Socket;
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.HexFormat;
@@ -35,6 +34,7 @@ public class Main {
 			case "download_piece" -> downloadPiece(args[3], Integer.parseInt(args[4]), args[2]);
 			case "download" -> download(args[3], args[2]);
 			case "magnet_parse" -> parseMagnet(args[1]);
+			case "magnet_handshake" -> handshakeMagnet(args[1]);
 			default -> System.out.println("Unknown command: " + command);
 		}
 	}
@@ -95,7 +95,7 @@ public class Main {
 			final var peer = Peer.connect(firstPeer, torrent);
 			final var fileOutputStream = new FileOutputStream(new File(outputPath));
 		) {
-			final var data = peer.downloadPiece(pieceIndex);
+			final var data = peer.downloadPiece(torrent, pieceIndex);
 			fileOutputStream.write(data);
 		}
 	}
@@ -112,7 +112,7 @@ public class Main {
 		) {
 			final var pieceCount = torrent.info().pieces().size();
 			for (var index = 0; index < pieceCount; ++index) {
-				final var data = peer.downloadPiece(index);
+				final var data = peer.downloadPiece(torrent, index);
 				fileOutputStream.write(data);
 			}
 		}
@@ -123,6 +123,17 @@ public class Main {
 
 		System.out.println("Tracker URL: %s".formatted(magnet.announce()));
 		System.out.println("Info Hash: %s".formatted(HEX_FORMAT.formatHex(magnet.hash())));
+	}
+
+	private static void handshakeMagnet(String link) throws IOException, InterruptedException {
+		final var magnet = Magnet.parse(link);
+
+		final var trackerClient = new TrackerClient();
+		final var firstPeer = trackerClient.announce(magnet).peers().getFirst();
+
+		try (final var peer = Peer.connect(firstPeer, magnet)) {
+			System.out.println("Peer ID: %s".formatted(HEX_FORMAT.formatHex(peer.getId())));
+		}
 	}
 
 	@SuppressWarnings("unchecked")

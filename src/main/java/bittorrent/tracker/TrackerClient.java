@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.util.Map;
 
 import bittorrent.bencode.Deserializer;
-import bittorrent.torrent.Torrent;
 import bittorrent.util.DigestUtils;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
@@ -15,18 +14,18 @@ public class TrackerClient {
 	public final OkHttpClient client = new OkHttpClient();
 
 	@SuppressWarnings("unchecked")
-	public AnnounceResponse announce(Torrent torrent) throws IOException {
+	public AnnounceResponse announce(Announceable announceable) throws IOException {
 		final var request = new Request.Builder()
 			.get()
 			.url(
-				HttpUrl.parse(torrent.announce())
+				HttpUrl.parse(announceable.getTrackerUrl())
 					.newBuilder()
-					.addEncodedQueryParameter("info_hash", DigestUtils.urlEncode(torrent.info().hash()))
+					.addEncodedQueryParameter("info_hash", DigestUtils.urlEncode(announceable.getInfoHash()))
 					.addQueryParameter("peer_id", "00112233445566778899")
 					.addQueryParameter("port", "6881")
 					.addQueryParameter("uploaded", "0")
 					.addQueryParameter("downloaded", "0")
-					.addQueryParameter("left", String.valueOf(torrent.info().length()))
+					.addQueryParameter("left", String.valueOf(announceable.getInfoLength()))
 					.addQueryParameter("compact", "1")
 					.build()
 			)
@@ -39,7 +38,7 @@ public class TrackerClient {
 			if (!response.isSuccessful()) {
 				throw new IllegalStateException(responseBody.string());
 			}
-
+			
 			try (final var inputStream = responseBody.byteStream()) {
 				final var deserializer = new Deserializer(inputStream);
 				final var root = deserializer.parse();

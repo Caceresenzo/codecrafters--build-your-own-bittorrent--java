@@ -10,6 +10,7 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.function.Predicate;
 
+import bittorrent.magnet.Magnet;
 import bittorrent.peer.message.BitfieldMessage;
 import bittorrent.peer.message.ChokeMessage;
 import bittorrent.peer.message.InterestedMessage;
@@ -20,23 +21,25 @@ import bittorrent.peer.message.PieceMessage;
 import bittorrent.peer.message.RequestMessage;
 import bittorrent.peer.message.UnchokeMessage;
 import bittorrent.torrent.Torrent;
+import bittorrent.tracker.Announceable;
 import bittorrent.util.DigestUtils;
 import lombok.Getter;
 
 public class Peer implements AutoCloseable {
 
 	public static boolean DEBUG = true;
-	private static final byte[] PADDING8 = new byte[8];
+
+	private static final byte[] PROTOCOL_BYTES = "BitTorrent protocol".getBytes(StandardCharsets.US_ASCII);
+	private static final byte[] PADDING_8 = new byte[8];
+	private static final byte[] PADDING_MAGNET_8 = { 0, 0, 0, 0, 0, 0x10, 0, 0 };
 
 	private final @Getter byte[] id;
-	private final Torrent torrent;
 	private final Socket socket;
 	private boolean bitfield;
 	private boolean interested;
 
-	public Peer(byte[] id, Torrent torrent, Socket socket) throws IOException {
+	public Peer(byte[] id, Socket socket) throws IOException {
 		this.id = id;
-		this.torrent = torrent;
 		this.socket = socket;
 	}
 
@@ -102,21 +105,21 @@ public class Peer implements AutoCloseable {
 
 		message.serialize(dataOutputStream);
 	}
-	
+
 	public void awaitBitfield() throws IOException {
 		if (bitfield) {
 			return;
 		}
-		
+
 		final var message = receive();
 		if (!(message instanceof BitfieldMessage)) {
 			throw new IllegalStateException("first message is not bitfield: " + message);
 		}
-		
+
 		bitfield = true;
 	}
 
-	public byte[] downloadPiece(int pieceIndex) throws IOException, InterruptedException {
+	public byte[] downloadPiece(Torrent torrent, int pieceIndex) throws IOException, InterruptedException {
 		awaitBitfield();
 		sendInterested();
 
@@ -175,7 +178,7 @@ public class Peer implements AutoCloseable {
 		if (interested) {
 			return;
 		}
-		
+
 		while (true) {
 			send(new InterestedMessage());
 
@@ -195,13 +198,16 @@ public class Peer implements AutoCloseable {
 		socket.close();
 	}
 
-	public static Peer connect(InetSocketAddress address, Torrent torrent) throws IOException {
+	public static Peer connect(InetSocketAddress address, Announceable announceable) throws IOException {
 		final var socket = new Socket(address.getAddress(), address.getPort());
 
-		return connect(socket, torrent);
+		return connect(socket, announceable);
 	}
 
-	public static Peer connect(Socket socket, Torrent torrent) throws IOException {
+	public static Peer connect(Socket socket, Announceable announceable) throws IOException {
+		final var infoHash = announceable.getInfoHash();
+		final var padding = announceable instanceof Magnet ? PADDING_MAGNET_8 : PADDING_8;
+
 		try {
 			final var inputStream = socket.getInputStream();
 			final var outputStream = socket.getOutputStream();
@@ -211,13 +217,13 @@ public class Peer implements AutoCloseable {
 				outputStream.write(19);
 
 				/* the string BitTorrent protocol */
-				outputStream.write("BitTorrent protocol".getBytes(StandardCharsets.US_ASCII));
+				outputStream.write(PROTOCOL_BYTES);
 
-				/* eight reserved bytes, which are all set to zero */
-				outputStream.write(PADDING8);
+				/* eight reserved bytes */
+				outputStream.write(padding);
 
 				/* sha1 infohash */
-				outputStream.write(torrent.info().hash());
+				outputStream.write(announceable.getInfoHash());
 
 				/* peer id */
 				outputStream.write("00112233445566778899".getBytes(StandardCharsets.US_ASCII));
@@ -229,21 +235,21 @@ public class Peer implements AutoCloseable {
 					throw new IllegalStateException("invalid protocol length: " + length);
 				}
 
-				final var protocolString = new String(inputStream.readNBytes(19), StandardCharsets.US_ASCII);
-				if (!"BitTorrent protocol".equals(protocolString)) {
-					throw new IllegalStateException("invalid protocol string: " + protocolString);
+				final var receivedProtocol = inputStream.readNBytes(19);
+				if (!Arrays.equals(receivedProtocol, PROTOCOL_BYTES)) {
+					throw new IllegalStateException("invalid protocol string: " + receivedProtocol);
 				}
 
 				/* padding */
 				inputStream.readNBytes(8);
 
-				final var infoHash = inputStream.readNBytes(20);
-				if (!Arrays.equals(infoHash, torrent.info().hash())) {
+				final var receivedInfoHash = inputStream.readNBytes(20);
+				if (!Arrays.equals(receivedInfoHash, infoHash)) {
 					throw new IllegalStateException("invalid info hash: " + Arrays.toString(infoHash));
 				}
 
 				final var peerId = inputStream.readNBytes(20);
-				return new Peer(peerId, torrent, socket);
+				return new Peer(peerId, socket);
 			}
 		} catch (Exception exception) {
 			socket.close();
