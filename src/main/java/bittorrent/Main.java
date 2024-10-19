@@ -131,15 +131,17 @@ public class Main {
 	@SneakyThrows
 	private static void handshakeMagnet(String link) throws IOException, InterruptedException {
 		final var magnet = Magnet.parse(link);
-		System.out.println(magnet);
 
 		final var trackerClient = new TrackerClient();
 		final var firstPeer = trackerClient.announce(magnet).peers().getFirst();
 
-		//		final var firstPeer = new InetSocketAddress(InetAddress.getByName("2.204.166.236"), 51414);
+		//		final var firstPeer = new java.net.InetSocketAddress(java.net.InetAddress.getByName("2.204.166.236"), 51414);
 
 		try (final var peer = Peer.connect(firstPeer, magnet)) {
 			System.out.println("Peer ID: %s".formatted(HEX_FORMAT.formatHex(peer.getId())));
+			peer.awaitBitfield();
+
+			System.out.println("Peer Metadata Extension ID: %s".formatted(peer.getPeerMetadataExtensionId()));
 		}
 	}
 

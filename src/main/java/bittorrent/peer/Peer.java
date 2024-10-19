@@ -34,6 +34,8 @@ public class Peer implements AutoCloseable {
 	private boolean bitfield;
 	private boolean interested;
 
+	private @Getter int peerMetadataExtensionId = -1;
+
 	public Peer(byte[] id, Socket socket, boolean supportExtensions) {
 		this.id = id;
 		this.socket = socket;
@@ -97,14 +99,37 @@ public class Peer implements AutoCloseable {
 		dataOutputStream.write(byteArrayOutputStream.getBuffer(), 0, length - 1);
 	}
 
+	@SuppressWarnings("rawtypes")
 	public void awaitBitfield() throws IOException {
 		if (bitfield) {
 			return;
 		}
 
-		final var message = receive();
-		if (!(message instanceof Message.Bitfield)) {
-			throw new IllegalStateException("first message is not bitfield: " + message);
+		if (supportExtensions) {
+			send(new Message.Extension((byte) 0, Map.of("m", Map.of("ut_metadata", 42))));
+
+			var message = receive();
+
+			if (message instanceof Message.Bitfield) {
+				bitfield = true;
+			} else if (message instanceof Message.Extension extension) {
+				System.err.println("extension: %s".formatted(extension));
+
+				final var metadata = (Map) extension.content().deserialized().get("m");
+				peerMetadataExtensionId = ((Number) metadata.get("ut_metadata")).intValue();
+			} else {
+				throw new IllegalStateException("first message is not bitfield or extension: " + message);
+			}
+
+			message = receive();
+			if (!(message instanceof Message.Bitfield)) {
+				throw new IllegalStateException("second message is not bitfield: " + message);
+			}
+		} else {
+			final var message = receive();
+			if (!(message instanceof Message.Bitfield)) {
+				throw new IllegalStateException("first message is not bitfield: " + message);
+			}
 		}
 
 		bitfield = true;
@@ -245,14 +270,7 @@ public class Peer implements AutoCloseable {
 				}
 
 				final var peerId = inputStream.readNBytes(20);
-				final var peer = new Peer(peerId, socket, supportExtensions);
-
-				if (supportExtensions) {
-					peer.send(new Message.Extension((byte) 0, Map.of("m", Map.of("ut_metadata", 42))));
-					System.out.println(peer.receive());
-				}
-
-				return peer;
+				return new Peer(peerId, socket, supportExtensions);
 			}
 		} catch (Exception exception) {
 			socket.close();
