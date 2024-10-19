@@ -2,6 +2,7 @@ package bittorrent.peer;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
@@ -51,7 +52,13 @@ public class Peer implements AutoCloseable {
 	private Message doReceive() throws IOException {
 		final var dataInputStream = new DataInputStream(socket.getInputStream());
 
-		final var length = dataInputStream.readInt();
+		final int length;
+		try {
+			length = dataInputStream.readInt();
+		} catch (EOFException exception) {
+			throw new PeerClosedException(exception);
+		}
+
 		final var typeId = length != 0 ? dataInputStream.readByte() : (byte) -1;
 
 		final var descriptor = MessageDescriptors.getByTypeId(typeId);
@@ -129,19 +136,23 @@ public class Peer implements AutoCloseable {
 	}
 
 	@SuppressWarnings("rawtypes")
-	public void awaitBitfield() throws IOException {
-		if (bitfield) {
+	public void awaitExtension() throws IOException {
+		if (supportExtensions) {
 			return;
 		}
 
-		if (supportExtensions) {
-			send(new Message.Extension((byte) 0, Map.of("m", Map.of("ut_metadata", 42))));
+		send(new Message.Extension((byte) 0, Map.of("m", Map.of("ut_metadata", 42))));
 
-			final var extension = waitFor(Message.Extension.class);
-			System.err.println("extension: %s".formatted(extension));
+		final var extension = waitFor(Message.Extension.class);
+		System.err.println("extension: %s".formatted(extension));
 
-			final var metadata = (Map) extension.content().deserialized().get("m");
-			peerMetadataExtensionId = ((Number) metadata.get("ut_metadata")).intValue();
+		final var metadata = (Map) extension.content().deserialized().get("m");
+		peerMetadataExtensionId = ((Number) metadata.get("ut_metadata")).intValue();
+	}
+
+	public void awaitBitfield() throws IOException {
+		if (bitfield) {
+			return;
 		}
 
 		waitFor(Message.Bitfield.class);

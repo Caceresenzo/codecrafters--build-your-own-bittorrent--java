@@ -139,7 +139,7 @@ public class Main {
 
 		try (final var peer = Peer.connect(firstPeer, magnet)) {
 			System.out.println("Peer ID: %s".formatted(HEX_FORMAT.formatHex(peer.getId())));
-			peer.awaitBitfield();
+			peer.awaitExtension();
 
 			System.out.println("Peer Metadata Extension ID: %s".formatted(peer.getPeerMetadataExtensionId()));
 		}
