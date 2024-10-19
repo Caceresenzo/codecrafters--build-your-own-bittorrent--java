@@ -40,6 +40,7 @@ public class Main {
 			case "magnet_handshake" -> magnetHandshake(args[1]);
 			case "magnet_info" -> magnetInfo(args[1]);
 			case "magnet_download_piece" -> magnetDownloadPiece(args[3], Integer.parseInt(args[4]), args[2]);
+			case "magnet_download" -> magnetDownload(args[3], args[2]);
 			default -> System.out.println("Unknown command: " + command);
 		}
 	}
@@ -110,7 +111,6 @@ public class Main {
 			final var peer = Peer.connect(firstPeer, torrent);
 			final var fileOutputStream = new FileOutputStream(new File(outputPath));
 		) {
-
 			final var pieceCount = torrent.info().pieces().size();
 			for (var index = 0; index < pieceCount; ++index) {
 				final var data = peer.downloadPiece(torrentInfo, index);
@@ -160,6 +160,23 @@ public class Main {
 		final var trackerClient = new TrackerClient();
 		final var firstPeer = trackerClient.announce(magnet).peers().getFirst();
 
+		try (
+			final var peer = Peer.connect(firstPeer, magnet);
+			final var fileOutputStream = new FileOutputStream(new File(outputPath));
+		) {
+			final var torrentInfo = peer.queryTorrentInfoViaMetadataExtension();
+
+			final var data = peer.downloadPiece(torrentInfo, pieceIndex);
+			fileOutputStream.write(data);
+		}
+	}
+
+	private static void magnetDownload(String link, String outputPath) throws IOException, InterruptedException {
+		final var magnet = Magnet.parse(link);
+
+		final var trackerClient = new TrackerClient();
+		final var firstPeer = trackerClient.announce(magnet).peers().getFirst();
+
 		//		final var firstPeer = new java.net.InetSocketAddress(java.net.InetAddress.getByName("2.204.166.236"), 51414);
 
 		try (
@@ -167,10 +184,12 @@ public class Main {
 			final var fileOutputStream = new FileOutputStream(new File(outputPath));
 		) {
 			final var torrentInfo = peer.queryTorrentInfoViaMetadataExtension();
-			info(magnet.announce(), torrentInfo);
 
-			final var data = peer.downloadPiece(torrentInfo, pieceIndex);
-			fileOutputStream.write(data);
+			final var pieceCount = torrentInfo.pieces().size();
+			for (var index = 0; index < pieceCount; ++index) {
+				final var data = peer.downloadPiece(torrentInfo, index);
+				fileOutputStream.write(data);
+			}
 		}
 	}
 
